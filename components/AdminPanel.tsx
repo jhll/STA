@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { CAREERS } from '../constants';
 import { SQL_SCHEMA } from '../constants/sqlSchema';
 import { supabase } from '../services/supabaseClient';
@@ -26,21 +26,125 @@ const AdminPanel: React.FC = () => {
   const [subjects, setSubjects] = useState<any[]>([]);
   const [loadingSubjects, setLoadingSubjects] = useState(false);
   const [filterCareerSubjects, setFilterCareerSubjects] = useState(CAREERS[0]);
+  const [filterSemesterSubjects, setFilterSemesterSubjects] = useState<string>('ALL');
   const [teachers, setTeachers] = useState<any[]>([]);
   const [loadingTeachers, setLoadingTeachers] = useState(true);
   const [showSubjectForm, setShowSubjectForm] = useState(false);
 
-  // Estados para Asignaciones
-  const [assignments, setAssignments] = useState<any[]>([]);
+  // Estados para Asignaciones y sus filtros
+  const [allAssignments, setAllAssignments] = useState<any[]>([]); // Todos los datos brutos
   const [loadingAssignments, setLoadingAssignments] = useState(false);
+  const [assignmentError, setAssignmentError] = useState<string | null>(null);
   const [showAssignmentForm, setShowAssignmentForm] = useState(false);
+  
+  const [asigFilterCareer, setAsigFilterCareer] = useState<string>('ALL');
+  const [asigFilterSemester, setAsigFilterSemester] = useState<string>('ALL');
+  const [asigFilterGroup, setAsigFilterGroup] = useState<string>('ALL');
+  
+  // Grupos detectados en la tabla de estudiantes según programa y semestre
+  const [studentGroupsDetected, setStudentGroupsDetected] = useState<string[]>([]);
+
   const [formAssignment, setFormAssignment] = useState({
     ciclo_id: '',
     materia_id: '',
     docente_id: '',
     nombre_grupo: '',
-    turno: 'Matutino'
+    turno: 'Matutino',
+    semestre: 1,
+    programa_estudio: CAREERS[0]
   });
+
+  const getErrorMessage = (err: any) => {
+    if (!err) return "Error desconocido";
+    if (typeof err === 'string') return err;
+    if (err.message) return err.message;
+    if (err.error_description) return err.error_description;
+    return JSON.stringify(err);
+  };
+
+  // --- LÓGICA DE FILTROS RELACIONADOS ---
+
+  // 1. Obtener semestres disponibles para la carrera seleccionada
+  const availableSemestersForFilter = useMemo(() => {
+    if (asigFilterCareer === 'ALL') return [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    const semestres = allAssignments
+      .filter(a => (a.materias as any)?.carrera === asigFilterCareer)
+      // Fix: Ensure mapped values are numbers and filter out undefined to avoid arithmetic errors in sort function (line 73/74)
+      .map(a => (a.materias as any)?.semestre)
+      .filter((s): s is number => typeof s === 'number');
+    return Array.from(new Set(semestres)).sort((a, b) => a - b);
+  }, [allAssignments, asigFilterCareer]);
+
+  // 2. Obtener grupos disponibles según Carrera y Semestre seleccionados
+  const availableGroupsForFilter = useMemo(() => {
+    let filtered = allAssignments;
+    if (asigFilterCareer !== 'ALL') {
+      filtered = filtered.filter(a => (a.materias as any)?.carrera === asigFilterCareer);
+    }
+    if (asigFilterSemester !== 'ALL') {
+      filtered = filtered.filter(a => (a.materias as any)?.semestre === parseInt(asigFilterSemester));
+    }
+    return Array.from(new Set(filtered.map(a => a.nombre_grupo))).filter(g => !!g).sort();
+  }, [allAssignments, asigFilterCareer, asigFilterSemester]);
+
+  // 3. Los datos finales de la tabla basados en todos los filtros
+  const filteredAssignments = useMemo(() => {
+    return allAssignments.filter(a => {
+      const matchCareer = asigFilterCareer === 'ALL' || (a.materias as any)?.carrera === asigFilterCareer;
+      const matchSemester = asigFilterSemester === 'ALL' || (a.materias as any)?.semestre === parseInt(asigFilterSemester);
+      const matchGroup = asigFilterGroup === 'ALL' || a.nombre_grupo === asigFilterGroup;
+      return matchCareer && matchSemester && matchGroup;
+    });
+  }, [allAssignments, asigFilterCareer, asigFilterSemester, asigFilterGroup]);
+
+  // Reset de filtros dependientes
+  useEffect(() => {
+    if (asigFilterSemester !== 'ALL' && !availableSemestersForFilter.includes(parseInt(asigFilterSemester))) {
+      setAsigFilterSemester('ALL');
+    }
+  }, [asigFilterCareer]);
+
+  useEffect(() => {
+    if (asigFilterGroup !== 'ALL' && !availableGroupsForFilter.includes(asigFilterGroup)) {
+      setAsigFilterGroup('ALL');
+    }
+  }, [asigFilterCareer, asigFilterSemester]);
+
+  // --- FIN LÓGICA DE FILTROS ---
+
+  useEffect(() => {
+    const fetchExistingStudentGroups = async () => {
+      if (!showAssignmentForm) return;
+      
+      try {
+        const { data, error } = await supabase
+          .from('estudiantes')
+          .select('grupo')
+          .eq('carrera', formAssignment.programa_estudio)
+          .eq('semestre', formAssignment.semestre);
+        
+        if (error) throw error;
+        
+        const unique = Array.from(new Set((data || []).map(s => s.grupo))).filter(g => !!g).sort();
+        setStudentGroupsDetected(unique);
+      } catch (err) {
+        console.error("Error fetching student groups:", err);
+      }
+    };
+
+    fetchExistingStudentGroups();
+  }, [formAssignment.programa_estudio, formAssignment.semestre, showAssignmentForm]);
+
+  const suggestedGroupsForForm = useMemo(() => {
+    const fromAssignments = allAssignments
+      .filter(a => 
+        (a.materias as any)?.carrera === formAssignment.programa_estudio && 
+        (a.materias as any)?.semestre === formAssignment.semestre
+      )
+      .map(a => a.nombre_grupo);
+      
+    return Array.from(new Set([...fromAssignments, ...studentGroupsDetected])).sort();
+  }, [allAssignments, studentGroupsDetected, formAssignment.programa_estudio, formAssignment.semestre]);
 
   const [formCiclo, setFormCiclo] = useState({
     nombre: '',
@@ -73,14 +177,6 @@ const AdminPanel: React.FC = () => {
     creditos: 5
   });
 
-  const getErrorMessage = (err: any) => {
-    if (!err) return "Error desconocido";
-    if (typeof err === 'string') return err;
-    if (err.message) return err.message;
-    return JSON.stringify(err);
-  };
-
-  // Funciones de carga de datos
   const fetchTeachers = async () => {
     setLoadingTeachers(true);
     try {
@@ -97,11 +193,18 @@ const AdminPanel: React.FC = () => {
   const fetchSubjectsList = async () => {
     setLoadingSubjects(true);
     try {
-      const { data, error } = await supabase
-        .from('materias')
-        .select('*')
-        .eq('carrera', filterCareerSubjects)
-        .order('semestre', { ascending: true });
+      let query = supabase.from('materias').select('*');
+      
+      if (activeTab === 'subjects') {
+        query = query.eq('carrera', filterCareerSubjects);
+        if (filterSemesterSubjects !== 'ALL') {
+          query = query.eq('semestre', parseInt(filterSemesterSubjects));
+        }
+      } else if (activeTab === 'assignments') {
+        query = query.eq('carrera', formAssignment.programa_estudio);
+      }
+
+      const { data, error } = await query.order('semestre', { ascending: true });
       if (error) throw error;
       setSubjects(data || []);
     } catch (err: any) { 
@@ -110,6 +213,12 @@ const AdminPanel: React.FC = () => {
       setLoadingSubjects(false); 
     }
   };
+
+  useEffect(() => {
+    if (showAssignmentForm) {
+      fetchSubjectsList();
+    }
+  }, [formAssignment.programa_estudio, showAssignmentForm]);
 
   const fetchCiclos = async () => {
     setLoadingCiclos(true);
@@ -120,7 +229,9 @@ const AdminPanel: React.FC = () => {
       const activo = data?.find(c => c.es_activo);
       if (activo) {
         setUploadData(prev => ({ ...prev, ciclo: activo.id }));
-        setFormAssignment(prev => ({ ...prev, ciclo_id: activo.id }));
+        if (!isEditing) {
+           setFormAssignment(prev => ({ ...prev, ciclo_id: activo.id }));
+        }
       }
     } catch (err: any) { 
       console.error("Error fetching cycles:", err); 
@@ -131,6 +242,7 @@ const AdminPanel: React.FC = () => {
 
   const fetchAssignments = async () => {
     setLoadingAssignments(true);
+    setAssignmentError(null);
     try {
       const { data, error } = await supabase
         .from('grupos')
@@ -138,15 +250,21 @@ const AdminPanel: React.FC = () => {
           id, 
           nombre_grupo, 
           turno, 
+          materia_id,
+          docente_id,
+          ciclo_id,
           materias (nombre, carrera, semestre), 
           docentes (nombre), 
           ciclos_escolares (nombre)
         `)
         .order('created_at', { ascending: false });
+      
       if (error) throw error;
-      setAssignments(data || []);
+      setAllAssignments(data || []);
     } catch (err: any) { 
-      console.error("Error fetching assignments:", err); 
+      const msg = getErrorMessage(err);
+      console.error("Error fetching assignments:", msg); 
+      setAssignmentError(msg);
     } finally { 
       setLoadingAssignments(false); 
     }
@@ -159,10 +277,9 @@ const AdminPanel: React.FC = () => {
     if (activeTab === 'assignments') {
       fetchCiclos();
       fetchTeachers();
-      fetchSubjectsList();
       fetchAssignments();
     }
-  }, [activeTab, filterCareerSubjects]);
+  }, [activeTab, filterCareerSubjects, filterSemesterSubjects]);
 
   const handleSaveAssignment = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -170,18 +287,49 @@ const AdminPanel: React.FC = () => {
       alert("Todos los campos son obligatorios.");
       return;
     }
+
+    const { semestre, programa_estudio, ...payload } = formAssignment;
+
     setIsSaving(true);
     try {
-      const { error } = await supabase.from('grupos').insert([formAssignment]);
-      if (error) throw error;
-      alert("Asignación académica guardada correctamente.");
+      if (isEditing) {
+        const { error } = await supabase
+          .from('grupos')
+          .update(payload)
+          .eq('id', editingId);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from('grupos').insert([payload]);
+        if (error) throw error;
+      }
+      alert(`Asignación académica ${isEditing ? 'actualizada' : 'guardada'} correctamente.`);
       setShowAssignmentForm(false);
       fetchAssignments();
-      setFormAssignment({ ...formAssignment, nombre_grupo: '', materia_id: '' });
+      setFormAssignment({
+        ciclo_id: ciclos.find(c => c.es_activo)?.id || '',
+        materia_id: '',
+        docente_id: '',
+        nombre_grupo: '',
+        turno: 'Matutino',
+        semestre: 1,
+        programa_estudio: CAREERS[0]
+      });
     } catch (err: any) {
-      alert("Error al asignar: " + getErrorMessage(err));
+      alert("Error al procesar asignación: " + getErrorMessage(err));
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleDeleteAssignment = async (id: string) => {
+    if (!confirm("¿Está seguro de eliminar esta asignación?")) return;
+    try {
+      const { error } = await supabase.from('grupos').delete().eq('id', id);
+      if (error) throw error;
+      fetchAssignments();
+      alert("Asignación eliminada.");
+    } catch (err: any) {
+      alert("Error: " + getErrorMessage(err));
     }
   };
 
@@ -210,15 +358,29 @@ const AdminPanel: React.FC = () => {
     e.preventDefault();
     setIsSaving(true);
     try {
-      const { error } = isEditing ? await supabase.from('materias').update(formSubject).eq('id', editingId) : await supabase.from('materias').insert([formSubject]);
+      const { error } = isEditing 
+        ? await supabase.from('materias').update(formSubject).eq('id', editingId) 
+        : await supabase.from('materias').insert([formSubject]);
       if (error) throw error;
       setShowSubjectForm(false);
       fetchSubjectsList();
-      alert("Materia guardada correctamente.");
+      alert(`Materia ${isEditing ? 'actualizada' : 'registrada'} correctamente.`);
     } catch (err: any) { 
       alert("Error: " + getErrorMessage(err)); 
     } finally { 
       setIsSaving(false); 
+    }
+  };
+
+  const handleDeleteSubject = async (id: string) => {
+    if (!confirm("¿Está seguro de eliminar esta materia de la malla curricular?")) return;
+    try {
+      const { error } = await supabase.from('materias').delete().eq('id', id);
+      if (error) throw error;
+      fetchSubjectsList();
+      alert("Materia eliminada.");
+    } catch (err: any) {
+      alert("Error al eliminar: " + getErrorMessage(err));
     }
   };
 
@@ -313,15 +475,62 @@ const AdminPanel: React.FC = () => {
                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
                   <div>
                     <h3 className="text-xl font-black text-gray-900 tracking-tight">Carga Académica Docente</h3>
-                    <p className="text-xs text-gray-400 font-bold uppercase tracking-widest mt-1">Vinculación de profesores con grupos y materias</p>
+                    <div className="flex flex-wrap gap-4 mt-2">
+                      <select 
+                        value={asigFilterCareer} 
+                        onChange={(e) => setAsigFilterCareer(e.target.value)} 
+                        className="bg-gray-50 border border-gray-100 rounded-xl px-4 py-2 text-xs font-bold text-gray-600 outline-none focus:ring-2 focus:ring-blue-500/10 transition-all"
+                      >
+                        <option value="ALL">TODOS LOS PROGRAMAS</option>
+                        {CAREERS.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                      
+                      <select 
+                        value={asigFilterSemester} 
+                        onChange={(e) => setAsigFilterSemester(e.target.value)} 
+                        className="bg-gray-50 border border-gray-100 rounded-xl px-4 py-2 text-xs font-bold text-gray-600 outline-none focus:ring-2 focus:ring-blue-500/10 transition-all"
+                      >
+                        <option value="ALL">TODOS LOS SEMESTRES</option>
+                        {availableSemestersForFilter.map(n => <option key={n} value={n}>{n}° SEMESTRE</option>)}
+                      </select>
+                      
+                      <select 
+                        value={asigFilterGroup} 
+                        onChange={(e) => setAsigFilterGroup(e.target.value)} 
+                        className="bg-gray-50 border border-gray-100 rounded-xl px-4 py-2 text-xs font-bold text-gray-600 outline-none focus:ring-2 focus:ring-blue-500/10 transition-all"
+                        disabled={availableGroupsForFilter.length === 0}
+                      >
+                        <option value="ALL">TODOS LOS GRUPOS</option>
+                        {availableGroupsForFilter.map(g => <option key={g} value={g}>GRUPO {g}</option>)}
+                      </select>
+                    </div>
                   </div>
                   <button 
-                    onClick={() => setShowAssignmentForm(true)} 
+                    onClick={() => {
+                      setIsEditing(false);
+                      setEditingId(null);
+                      setFormAssignment({
+                        ciclo_id: ciclos.find(c => c.es_activo)?.id || '',
+                        materia_id: '',
+                        docente_id: '',
+                        nombre_grupo: '',
+                        turno: 'Matutino',
+                        semestre: 1,
+                        programa_estudio: CAREERS[0]
+                      });
+                      setShowAssignmentForm(true);
+                    }} 
                     className="bg-gray-900 text-white px-8 py-3.5 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl hover:bg-blue-600 transition-all"
                   >
                     + Nueva Asignación
                   </button>
                </div>
+
+               {assignmentError && (
+                 <div className="p-4 bg-red-50 border border-red-100 rounded-2xl text-red-600 text-xs font-bold">
+                   ⚠️ Error al cargar asignaciones: {assignmentError}
+                 </div>
+               )}
 
                <div className="bg-white border rounded-3xl overflow-hidden shadow-sm">
                   <table className="w-full text-left">
@@ -329,34 +538,63 @@ const AdminPanel: React.FC = () => {
                       <tr>
                         <th className="px-8 py-5">Docente</th>
                         <th className="px-8 py-5">Asignatura / Carrera</th>
-                        <th className="px-8 py-5">Grupo / Turno</th>
+                        <th className="px-8 py-5">Grupo / Programa</th>
                         <th className="px-8 py-5">Ciclo</th>
-                        <th className="px-8 py-5 text-right">Acción</th>
+                        <th className="px-8 py-5 text-right">Acciones</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
                       {loadingAssignments ? (
-                        <tr><td colSpan={5} className="py-20 text-center animate-pulse">Consultando asignaciones...</td></tr>
-                      ) : assignments.length === 0 ? (
-                        <tr><td colSpan={5} className="py-20 text-center text-gray-400 font-medium">No hay asignaciones registradas para este periodo.</td></tr>
-                      ) : assignments.map(asig => (
+                        <tr><td colSpan={5} className="py-20 text-center animate-pulse text-gray-300 font-black">Sincronizando registros...</td></tr>
+                      ) : filteredAssignments.length === 0 ? (
+                        <tr><td colSpan={5} className="py-20 text-center text-gray-400 font-medium">No se encontraron asignaciones con los filtros seleccionados.</td></tr>
+                      ) : filteredAssignments.map(asig => (
                         <tr key={asig.id} className="hover:bg-gray-50 transition-colors">
                           <td className="px-8 py-6">
-                            <p className="font-bold text-gray-900">{asig.docentes?.nombre}</p>
+                            <p className="font-bold text-gray-900">{(asig.docentes as any)?.nombre}</p>
                           </td>
                           <td className="px-8 py-6">
-                            <p className="font-bold text-blue-600 text-xs">{asig.materias?.nombre}</p>
-                            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{asig.materias?.carrera}</p>
+                            <p className="font-bold text-blue-600 text-xs">{(asig.materias as any)?.nombre}</p>
+                            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{(asig.materias as any)?.carrera} ({(asig.materias as any)?.semestre}° Sem)</p>
                           </td>
                           <td className="px-8 py-6">
-                            <div className="flex items-center gap-2">
-                              <span className="bg-gray-100 px-2 py-1 rounded text-[10px] font-black">{asig.nombre_grupo}</span>
-                              <span className="text-xs text-gray-500">{asig.turno}</span>
+                            <div className="flex flex-col gap-1">
+                              <div className="flex items-center gap-2">
+                                <span className="bg-gray-100 px-2 py-1 rounded text-[10px] font-black">{asig.nombre_grupo}</span>
+                                <span className="text-xs text-gray-500">{asig.turno}</span>
+                              </div>
+                              <span className="text-[9px] font-black text-blue-500/60 uppercase tracking-widest italic">{(asig.materias as any)?.carrera}</span>
                             </div>
                           </td>
-                          <td className="px-8 py-6 text-xs text-gray-500 font-bold">{asig.ciclos_escolares?.nombre}</td>
-                          <td className="px-8 py-6 text-right">
-                             <button className="text-red-400 hover:text-red-600 p-2">🗑️</button>
+                          <td className="px-8 py-6 text-xs text-gray-500 font-bold">{(asig.ciclos_escolares as any)?.nombre}</td>
+                          <td className="px-8 py-6 text-right space-x-2">
+                             <button 
+                               onClick={() => {
+                                 setEditingId(asig.id);
+                                 setFormAssignment({
+                                   ciclo_id: asig.ciclo_id,
+                                   materia_id: asig.materia_id,
+                                   docente_id: asig.docente_id,
+                                   nombre_grupo: asig.nombre_grupo,
+                                   turno: asig.turno,
+                                   semestre: (asig.materias as any)?.semestre,
+                                   programa_estudio: (asig.materias as any)?.carrera || CAREERS[0]
+                                 });
+                                 setIsEditing(true);
+                                 setShowAssignmentForm(true);
+                               }}
+                               className="p-2 bg-gray-50 rounded-lg hover:bg-blue-600 hover:text-white transition-all shadow-sm"
+                               title="Editar asignación"
+                             >
+                               ✏️
+                             </button>
+                             <button 
+                               onClick={() => handleDeleteAssignment(asig.id)}
+                               className="p-2 bg-gray-50 rounded-lg hover:bg-red-600 hover:text-white transition-all shadow-sm"
+                               title="Eliminar asignación"
+                             >
+                               🗑️
+                             </button>
                           </td>
                         </tr>
                       ))}
@@ -399,24 +637,78 @@ const AdminPanel: React.FC = () => {
               <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
                   <h3 className="text-xl font-black text-gray-900 tracking-tight">Malla Curricular</h3>
-                  <select value={filterCareerSubjects} onChange={(e) => setFilterCareerSubjects(e.target.value)} className="mt-2 bg-gray-50 border border-gray-100 rounded-xl px-4 py-2 text-xs font-bold text-gray-600 outline-none">
-                    {CAREERS.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
+                  <div className="flex gap-4 mt-2">
+                    <select 
+                      value={filterCareerSubjects} 
+                      onChange={(e) => setFilterCareerSubjects(e.target.value)} 
+                      className="bg-gray-50 border border-gray-100 rounded-xl px-4 py-2 text-xs font-bold text-gray-600 outline-none focus:ring-2 focus:ring-blue-500/10 transition-all"
+                    >
+                      {CAREERS.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                    <select 
+                      value={filterSemesterSubjects} 
+                      onChange={(e) => setFilterSemesterSubjects(e.target.value)} 
+                      className="bg-gray-50 border border-gray-100 rounded-xl px-4 py-2 text-xs font-bold text-gray-600 outline-none focus:ring-2 focus:ring-blue-500/10 transition-all"
+                    >
+                      <option value="ALL">TODOS LOS SEMESTRES</option>
+                      {[1,2,3,4,5,6,7,8,9,10].map(n => <option key={n} value={n}>{n}° SEMESTRE</option>)}
+                    </select>
+                  </div>
                 </div>
-                <button onClick={() => { setIsEditing(false); setFormSubject({codigo: '', nombre: '', carrera: filterCareerSubjects, semestre: 1, creditos: 5}); setShowSubjectForm(true); }} className="bg-gray-900 text-white px-8 py-3.5 rounded-2xl font-black text-xs uppercase shadow-xl hover:bg-blue-600">Añadir Materia</button>
+                <button 
+                  onClick={() => { 
+                    setIsEditing(false); 
+                    setFormSubject({codigo: '', nombre: '', carrera: filterCareerSubjects, semestre: filterSemesterSubjects === 'ALL' ? 1 : parseInt(filterSemesterSubjects), creditos: 5}); 
+                    setShowSubjectForm(true); 
+                  }} 
+                  className="bg-gray-900 text-white px-8 py-3.5 rounded-2xl font-black text-xs uppercase shadow-xl hover:bg-blue-600 transition-all"
+                >
+                  Añadir Materia
+                </button>
               </div>
               <div className="bg-white border rounded-3xl overflow-hidden shadow-sm">
                 <table className="w-full text-left">
                   <thead className="bg-gray-50 text-[10px] font-black uppercase text-gray-400 border-b tracking-widest">
-                    <tr><th className="px-8 py-5">Código</th><th className="px-8 py-5">Nombre</th><th className="px-8 py-5">Semestre</th><th className="px-8 py-5 text-right">Créditos</th></tr>
+                    <tr>
+                      <th className="px-8 py-5">Código</th>
+                      <th className="px-8 py-5">Nombre</th>
+                      <th className="px-8 py-5 text-center">Semestre</th>
+                      <th className="px-8 py-5 text-center">Créditos</th>
+                      <th className="px-8 py-5 text-right">Acciones</th>
+                    </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {subjects.map(s => (
+                    {loadingSubjects ? (
+                      <tr><td colSpan={5} className="py-10 text-center animate-pulse">Cargando materias...</td></tr>
+                    ) : subjects.length === 0 ? (
+                      <tr><td colSpan={5} className="py-10 text-center text-gray-400 font-medium">No se encontraron materias con los filtros seleccionados.</td></tr>
+                    ) : subjects.map(s => (
                       <tr key={s.id} className="hover:bg-gray-50 transition-colors">
                         <td className="px-8 py-5 font-mono text-xs font-black text-indigo-600">{s.codigo}</td>
-                        <td className="px-8 py-5 font-bold">{s.nombre}</td>
-                        <td className="px-8 py-5 text-gray-500">{s.semestre}° Semestre</td>
-                        <td className="px-8 py-5 text-right font-black text-blue-600">{s.creditos}</td>
+                        <td className="px-8 py-5 font-bold text-gray-900">{s.nombre}</td>
+                        <td className="px-8 py-5 text-center text-gray-500 font-black">{s.semestre}°</td>
+                        <td className="px-8 py-5 text-center font-black text-blue-600">{s.creditos}</td>
+                        <td className="px-8 py-5 text-right space-x-2">
+                          <button 
+                            onClick={() => { 
+                              setFormSubject(s); 
+                              setEditingId(s.id); 
+                              setIsEditing(true); 
+                              setShowSubjectForm(true); 
+                            }} 
+                            className="p-2 bg-gray-50 rounded-lg hover:bg-blue-600 hover:text-white transition-all shadow-sm"
+                            title="Editar materia"
+                          >
+                            ✏️
+                          </button>
+                          <button 
+                            onClick={() => handleDeleteSubject(s.id)} 
+                            className="p-2 bg-gray-50 rounded-lg hover:bg-red-600 hover:text-white transition-all shadow-sm"
+                            title="Eliminar materia"
+                          >
+                            🗑️
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -507,7 +799,7 @@ const AdminPanel: React.FC = () => {
             <div className="p-8 border-b border-white/5 flex justify-between items-center bg-white/5">
               <div>
                 <h3 className="text-xl font-black text-white tracking-tight">Esquema de Base de Datos (Supabase)</h3>
-                <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest mt-1">STA-FCQB CORE SQL v3.0</p>
+                <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest mt-1">STA-FCQB CORE SQL v5.4</p>
               </div>
               <div className="flex gap-4">
                 <button onClick={copyToClipboard} className="bg-blue-600 text-white px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-500 transition-all">Copiar Script</button>
@@ -528,45 +820,115 @@ const AdminPanel: React.FC = () => {
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-300">
             <div className="p-8 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-              <h3 className="text-xl font-black text-gray-900">Vincular Docente a Grupo</h3>
+              <h3 className="text-xl font-black text-gray-900">{isEditing ? 'Editar Asignación' : 'Vincular Docente a Grupo'}</h3>
               <button onClick={() => setShowAssignmentForm(false)} className="text-gray-400 hover:text-gray-900 transition-colors text-2xl">✕</button>
             </div>
-            <form onSubmit={handleSaveAssignment} className="p-10 space-y-5">
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Ciclo Escolar Activo</label>
-                <select value={formAssignment.ciclo_id} onChange={e => setFormAssignment({...formAssignment, ciclo_id: e.target.value})} className="w-full bg-gray-50 border border-gray-100 p-4 rounded-2xl text-sm font-bold outline-none focus:ring-4 focus:ring-blue-500/10 transition-all">
-                  <option value="">Seleccione ciclo...</option>
-                  {ciclos.map(c => <option key={c.id} value={c.id}>{c.nombre} {c.es_activo ? '(ACTUAL)' : ''}</option>)}
-                </select>
-              </div>
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Docente Responsable</label>
-                <select value={formAssignment.docente_id} onChange={e => setFormAssignment({...formAssignment, docente_id: e.target.value})} className="w-full bg-gray-50 border border-gray-100 p-4 rounded-2xl text-sm font-bold outline-none focus:ring-4 focus:ring-blue-500/10 transition-all">
-                  <option value="">Seleccione docente...</option>
-                  {teachers.map(t => <option key={t.id} value={t.id}>{t.nombre}</option>)}
-                </select>
-              </div>
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Materia (Filtrada por {filterCareerSubjects})</label>
-                <select value={formAssignment.materia_id} onChange={e => setFormAssignment({...formAssignment, materia_id: e.target.value})} className="w-full bg-gray-50 border border-gray-100 p-4 rounded-2xl text-sm font-bold outline-none focus:ring-4 focus:ring-blue-500/10 transition-all">
-                  <option value="">Seleccione asignatura...</option>
-                  {subjects.map(s => <option key={s.id} value={s.id}>{s.nombre} ({s.semestre}° Sem)</option>)}
-                </select>
-              </div>
+            <form onSubmit={handleSaveAssignment} className="p-10 space-y-4">
               <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Nombre del Grupo</label>
-                  <input type="text" placeholder="Ej: 301" value={formAssignment.nombre_grupo} onChange={e => setFormAssignment({...formAssignment, nombre_grupo: e.target.value.toUpperCase()})} className="w-full bg-gray-50 border border-gray-100 p-4 rounded-2xl text-sm font-bold outline-none" required />
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Ciclo Escolar</label>
+                  <select value={formAssignment.ciclo_id} onChange={e => setFormAssignment({...formAssignment, ciclo_id: e.target.value})} className="w-full bg-gray-50 border border-gray-100 p-3 rounded-xl text-xs font-bold outline-none">
+                    <option value="">Seleccione ciclo...</option>
+                    {ciclos.map(c => <option key={c.id} value={c.id}>{c.nombre} {c.es_activo ? '(ACTUAL)' : ''}</option>)}
+                  </select>
                 </div>
-                <div className="space-y-2">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Docente Responsable</label>
+                  <select value={formAssignment.docente_id} onChange={e => setFormAssignment({...formAssignment, docente_id: e.target.value})} className="w-full bg-gray-50 border border-gray-100 p-3 rounded-xl text-xs font-bold outline-none">
+                    <option value="">Seleccione docente...</option>
+                    {teachers.map(t => <option key={t.id} value={t.id}>{t.nombre}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Programa de Estudios</label>
+                  <select 
+                    value={formAssignment.programa_estudio} 
+                    onChange={e => setFormAssignment({...formAssignment, programa_estudio: e.target.value, materia_id: '', nombre_grupo: ''})} 
+                    className="w-full bg-gray-50 border border-gray-100 p-3 rounded-xl text-xs font-bold outline-none"
+                    required
+                  >
+                    {CAREERS.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Semestre</label>
+                  <select 
+                    value={formAssignment.semestre} 
+                    onChange={e => setFormAssignment({...formAssignment, semestre: parseInt(e.target.value), materia_id: '', nombre_grupo: ''})} 
+                    className="w-full bg-blue-50 border border-blue-100 p-3 rounded-xl text-xs font-bold text-blue-900 outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
+                  >
+                    {[1,2,3,4,5,6,7,8,9,10].map(n => <option key={n} value={n}>{n}° SEMESTRE</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Materia (Filtrada por Programa y Semestre)</label>
+                <select 
+                  value={formAssignment.materia_id} 
+                  onChange={e => setFormAssignment({...formAssignment, materia_id: e.target.value})} 
+                  className="w-full bg-gray-50 border border-gray-100 p-3 rounded-xl text-xs font-bold outline-none"
+                  required
+                >
+                  <option value="">Seleccione asignatura...</option>
+                  {subjects
+                    .filter(s => s.semestre === formAssignment.semestre && s.carrera === formAssignment.programa_estudio)
+                    .map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)
+                  }
+                </select>
+                {subjects.filter(s => s.semestre === formAssignment.semestre && s.carrera === formAssignment.programa_estudio).length === 0 && (
+                  <p className="text-[9px] text-red-500 font-bold mt-1 uppercase tracking-tighter italic">* No hay materias registradas para este programa en el semestre {formAssignment.semestre}.</p>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1 relative">
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1 flex justify-between">
+                    ID del Grupo 
+                    {suggestedGroupsForForm.length > 0 && (
+                      <span className="text-blue-500 lowercase font-bold">({suggestedGroupsForForm.length} detectados)</span>
+                    )}
+                  </label>
+                  <input 
+                    list="suggested-groups"
+                    type="text" 
+                    placeholder="Ej: 301, 102A" 
+                    value={formAssignment.nombre_grupo} 
+                    onChange={e => setFormAssignment({...formAssignment, nombre_grupo: e.target.value.toUpperCase()})} 
+                    className={`w-full bg-gray-50 border p-3 rounded-xl text-xs font-bold outline-none focus:ring-4 focus:ring-blue-500/10 transition-all ${
+                      studentGroupsDetected.includes(formAssignment.nombre_grupo) ? 'border-emerald-200 bg-emerald-50/10' : 'border-gray-100'
+                    }`} 
+                    required 
+                  />
+                  <datalist id="suggested-groups">
+                    {suggestedGroupsForForm.map(g => (
+                      <option key={g} value={g}>
+                        {studentGroupsDetected.includes(g) ? 'Grupo con matrícula detectada' : 'Grupo de otra materia'}
+                      </option>
+                    ))}
+                  </datalist>
+                  {formAssignment.nombre_grupo && !studentGroupsDetected.includes(formAssignment.nombre_grupo) && (
+                    <p className="text-[8px] text-amber-600 font-bold mt-1 italic uppercase">* No se detectó matrícula de alumnos para este ID de grupo en {formAssignment.programa_estudio} Semestre {formAssignment.semestre}.</p>
+                  )}
+                  {formAssignment.nombre_grupo && studentGroupsDetected.includes(formAssignment.nombre_grupo) && (
+                    <p className="text-[8px] text-emerald-600 font-bold mt-1 italic uppercase">✓ Grupo verificado con matrícula de alumnos.</p>
+                  )}
+                </div>
+                <div className="space-y-1">
                   <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Turno</label>
-                  <select value={formAssignment.turno} onChange={e => setFormAssignment({...formAssignment, turno: e.target.value})} className="w-full bg-gray-50 border border-gray-100 p-4 rounded-2xl text-sm font-bold outline-none">
+                  <select value={formAssignment.turno} onChange={e => setFormAssignment({...formAssignment, turno: e.target.value})} className="w-full bg-gray-50 border border-gray-100 p-3 rounded-xl text-xs font-bold outline-none">
                     <option value="Matutino">Matutino</option>
                     <option value="Vespertino">Vespertino</option>
                   </select>
                 </div>
               </div>
-              <button disabled={isSaving} className="w-full bg-gray-900 text-white py-5 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl hover:bg-blue-600 transition-all disabled:opacity-50 mt-4">{isSaving ? 'Vinculando...' : 'Confirmar Asignación'}</button>
+
+              <button disabled={isSaving} className="w-full bg-gray-900 text-white py-4 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-xl hover:bg-blue-600 transition-all disabled:opacity-50 mt-4">
+                {isSaving ? 'Guardando...' : (isEditing ? 'Actualizar Registro' : 'Confirmar Vinculación')}
+              </button>
             </form>
           </div>
         </div>
