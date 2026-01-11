@@ -231,7 +231,7 @@ const Dashboard: React.FC<{ role: UserRole; userId: string }> = ({ role, userId 
         </div>
       </div>
 
-      {selectedStudent && <StudentProfile student={selectedStudent} onClose={() => setSelectedStudent(null)} />}
+      {selectedStudent && <StudentProfile student={selectedStudent} role={role} onClose={() => setSelectedStudent(null)} />}
     </div>
   );
 };

@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../services/supabaseClient';
-import { Student, RiskLevel } from '../types';
+import { Student, RiskLevel, UserRole } from '../types';
 import { calculateRisk } from '../constants';
 import StudentProfile from './StudentProfile';
 
@@ -12,7 +12,7 @@ interface TeacherGroup {
   materias: { nombre: string; carrera: string; semestre: number };
 }
 
-const GroupView: React.FC<{ userId: string }> = ({ userId }) => {
+const GroupView: React.FC<{ userId: string; role: UserRole }> = ({ userId, role }) => {
   const [assignedGroups, setAssignedGroups] = useState<TeacherGroup[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState<string>('');
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
@@ -128,7 +128,7 @@ const GroupView: React.FC<{ userId: string }> = ({ userId }) => {
         <div className="w-full xl:w-1/2">
            <div className="flex items-center gap-3 mb-2">
              <span className="bg-blue-600 text-white text-[9px] font-black uppercase px-2 py-1 rounded-md tracking-widest">Docente Tutor</span>
-             <h2 className="text-3xl font-black text-gray-900 tracking-tighter leading-none">Control de Asistencia</h2>
+             <h2 className="text-3xl font-black text-gray-900 tracking-tighter leading-none mb-2">Control de Asistencia</h2>
            </div>
            <p className="text-gray-400 font-medium">Gestiona la puntualidad diaria y actualiza el riesgo académico.</p>
            
@@ -199,7 +199,7 @@ const GroupView: React.FC<{ userId: string }> = ({ userId }) => {
           </tbody>
         </table>
       </div>
-      {selectedStudent && <StudentProfile student={selectedStudent} onClose={() => setSelectedStudent(null)} />}
+      {selectedStudent && <StudentProfile student={selectedStudent} role={role} onClose={() => setSelectedStudent(null)} />}
     </div>
   );
 };

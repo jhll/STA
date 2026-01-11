@@ -63,7 +63,6 @@ const App: React.FC = () => {
 
               <div className="flex items-center gap-3 cursor-pointer" onClick={() => { setActiveView('dashboard'); setIsMenuOpen(false); }}>
                 <div className="w-14 h-14 bg-white rounded-lg flex items-center justify-center p-1 shadow-inner border border-gray-200">
-                   {/* Logo FCQB en el Navbar - Ruta corregida y tamaño natural */}
                    <img src="images/fcqb_logo.png" alt="FCQB" className="max-w-full max-h-full object-contain" />
                 </div>
                 <div className="flex flex-col">
@@ -141,7 +140,7 @@ const App: React.FC = () => {
         </div>
         {activeView === 'dashboard' && <Dashboard role={currentRole} userId={userId} />}
         {activeView === 'student-list' && <StudentListView role={currentRole} userId={userId} />}
-        {activeView === 'groups' && <GroupView userId={userId} />}
+        {activeView === 'groups' && <GroupView userId={userId} role={currentRole} />}
         {activeView === 'activities' && <ActivitiesModule userId={userId} role={currentRole} />}
         {activeView === 'admin' && <AdminPanel />}
         {activeView === 'analytics' && <AnalyticsView />}

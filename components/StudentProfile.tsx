@@ -1,16 +1,17 @@
 
 import React, { useState, useEffect } from 'react';
-import { Student, RiskLevel, Intervention } from '../types';
+import { Student, RiskLevel, Intervention, UserRole } from '../types';
 import { RISK_COLORS, RISK_LABELS } from '../constants';
 import { analyzeStudentRisk } from '../services/geminiService';
 import { supabase } from '../services/supabaseClient';
 
 interface StudentProfileProps {
   student: Student;
+  role: UserRole;
   onClose: () => void;
 }
 
-const StudentProfile: React.FC<StudentProfileProps> = ({ student, onClose }) => {
+const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, onClose }) => {
   const [activeTab, setActiveTab] = useState<'info' | 'academic' | 'ai' | 'interventions'>('info');
   const [aiAnalysis, setAiAnalysis] = useState<any>(null);
   const [loadingAi, setLoadingAi] = useState(false);
@@ -106,6 +107,14 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, onClose }) => 
     }
   };
 
+  const tabs = [
+    { id: 'info', label: 'Integral', icon: '👤' },
+    // Ocultar historial académico para docentes
+    ...(role === UserRole.ADMIN ? [{ id: 'academic', label: 'Académico', icon: '📚' }] : []),
+    { id: 'ai', label: 'Análisis IA', icon: '✨' },
+    { id: 'interventions', label: 'Bitácora', icon: '🛠️' },
+  ];
+
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
@@ -129,12 +138,7 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, onClose }) => 
 
         {/* Tabs */}
         <div className="flex border-b border-gray-100 bg-gray-50/50">
-          {[
-            { id: 'info', label: 'Integral', icon: '👤' },
-            { id: 'academic', label: 'Académico', icon: '📚' },
-            { id: 'ai', label: 'Análisis IA', icon: '✨' },
-            { id: 'interventions', label: 'Bitácora', icon: '🛠️' },
-          ].map((tab) => (
+          {tabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as any)}
@@ -202,7 +206,7 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, onClose }) => 
             </div>
           )}
 
-          {activeTab === 'academic' && (
+          {activeTab === 'academic' && role === UserRole.ADMIN && (
             <div className="space-y-6 animate-in fade-in duration-300">
               <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden shadow-sm">
                 <table className="w-full text-left">

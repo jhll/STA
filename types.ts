@@ -52,6 +52,10 @@ export interface Student {
   academicFactors: string[];
   institutionalFactors: string[];
   ciclo_id?: string;
+  // Promedios por categoría
+  avgExams?: number;
+  avgTasks?: number;
+  avgExercises?: number;
 }
 
 export interface Activity {

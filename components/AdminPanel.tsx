@@ -5,10 +5,9 @@ import { SQL_SCHEMA } from '../constants/sqlSchema';
 import { supabase } from '../services/supabaseClient';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
-import ManualGenerator from './ManualGenerator';
 
 const AdminPanel: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'users' | 'upload' | 'subjects' | 'ciclos' | 'assignments' | 'manual'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'upload' | 'subjects' | 'ciclos' | 'assignments'>('users');
   const [showRegisterForm, setShowRegisterForm] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -69,10 +68,10 @@ const AdminPanel: React.FC = () => {
     if (asigFilterCareer === 'ALL') return [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
     const semestres = allAssignments
       .filter(a => (a.materias as any)?.carrera === asigFilterCareer)
-      // Fix: Ensure mapped values are numbers and filter out undefined to avoid arithmetic errors in sort function (line 73/74)
       .map(a => (a.materias as any)?.semestre)
       .filter((s): s is number => typeof s === 'number');
-    return Array.from(new Set(semestres)).sort((a, b) => a - b);
+    
+    return Array.from(new Set(semestres)).sort((a: number, b: number) => a - b);
   }, [allAssignments, asigFilterCareer]);
 
   // 2. Obtener grupos disponibles según Carrera y Semestre seleccionados
@@ -109,8 +108,6 @@ const AdminPanel: React.FC = () => {
       setAsigFilterGroup('ALL');
     }
   }, [asigFilterCareer, asigFilterSemester]);
-
-  // --- FIN LÓGICA DE FILTROS ---
 
   useEffect(() => {
     const fetchExistingStudentGroups = async () => {
@@ -464,12 +461,9 @@ const AdminPanel: React.FC = () => {
           <button onClick={() => setActiveTab('assignments')} className={`px-10 py-5 text-[11px] font-black uppercase tracking-widest border-b-2 ${activeTab === 'assignments' ? 'text-blue-600 border-blue-600 bg-white' : 'text-gray-400 hover:text-gray-900'}`}>Asignaciones</button>
           <button onClick={() => setActiveTab('ciclos')} className={`px-10 py-5 text-[11px] font-black uppercase tracking-widest border-b-2 ${activeTab === 'ciclos' ? 'text-blue-600 border-blue-600 bg-white' : 'text-gray-400 hover:text-gray-900'}`}>Ciclos</button>
           <button onClick={() => setActiveTab('upload')} className={`px-10 py-5 text-[11px] font-black uppercase tracking-widest border-b-2 ${activeTab === 'upload' ? 'text-blue-600 border-blue-600 bg-white' : 'text-gray-400 hover:text-gray-900'}`}>Carga Alumnos</button>
-          <button onClick={() => setActiveTab('manual')} className={`px-10 py-5 text-[11px] font-black uppercase tracking-widest border-b-2 ${activeTab === 'manual' ? 'text-blue-600 border-blue-600 bg-white' : 'text-gray-400 hover:text-gray-900'}`}>Manual IA</button>
         </div>
 
         <div className="p-10">
-          {activeTab === 'manual' && <ManualGenerator />}
-          
           {activeTab === 'assignments' && (
             <div className="space-y-8 animate-in fade-in duration-300">
                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
