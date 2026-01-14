@@ -238,34 +238,94 @@ const ActivitiesModule: React.FC<ActivitiesModuleProps> = ({ userId, role }) => 
 
       {showCreateModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-[100] p-4">
-          <div className="bg-white rounded-[3.5rem] shadow-2xl w-full max-w-lg p-12 overflow-y-auto max-h-[90vh]">
+          <div className="bg-white rounded-[3.5rem] shadow-2xl w-full max-w-xl p-12 overflow-y-auto max-h-[90vh]">
             <h3 className="text-2xl font-black text-[#003B5C] mb-8">{isEditing ? 'Actualizar Actividad' : 'Nueva Actividad'}</h3>
             <form onSubmit={handleSaveActivity} className="space-y-6">
-              <div className="space-y-1">
-                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Grupo</label>
-                <select className="w-full bg-gray-50 border border-gray-100 p-4 rounded-xl font-bold text-sm" value={newActivity.grupo_id} onChange={e => setNewActivity({...newActivity, grupo_id: e.target.value})} required>
-                  <option value="">Selecciona...</option>
-                  {assignedGroups.map(g => <option key={g.id} value={g.id}>{g.nombre_grupo} - {g.materias?.nombre}</option>)}
-                </select>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Grupo Asignado</label>
+                  <select 
+                    className="w-full bg-gray-50 border border-gray-100 p-4 rounded-xl font-bold text-sm outline-none focus:ring-4 focus:ring-blue-500/10 transition-all" 
+                    value={newActivity.grupo_id} 
+                    onChange={e => setNewActivity({...newActivity, grupo_id: e.target.value})} 
+                    required
+                  >
+                    <option value="">Selecciona...</option>
+                    {assignedGroups.map(g => <option key={g.id} value={g.id}>{g.nombre_grupo} - {g.materias?.nombre}</option>)}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Tipo de Actividad</label>
+                  <select 
+                    className="w-full bg-gray-50 border border-gray-100 p-4 rounded-xl font-bold text-sm outline-none focus:ring-4 focus:ring-blue-500/10 transition-all" 
+                    value={newActivity.tipo} 
+                    onChange={e => setNewActivity({...newActivity, tipo: e.target.value as ActivityType})} 
+                    required
+                  >
+                    <option value={ActivityType.TAREA}>Tarea</option>
+                    <option value={ActivityType.EJERCICIO}>Ejercicio</option>
+                    <option value={ActivityType.EXAMEN}>Examen</option>
+                  </select>
+                </div>
               </div>
+
               <div className="space-y-1">
-                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Título</label>
-                <input type="text" className="w-full bg-gray-50 border border-gray-100 p-4 rounded-xl font-bold text-sm" value={newActivity.titulo} onChange={e => setNewActivity({...newActivity, titulo: e.target.value})} required />
+                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Título de la Actividad</label>
+                <input 
+                  type="text" 
+                  className="w-full bg-gray-50 border border-gray-100 p-4 rounded-xl font-bold text-sm outline-none focus:ring-4 focus:ring-blue-500/10 transition-all" 
+                  placeholder="Ej: Análisis de Proteínas"
+                  value={newActivity.titulo} 
+                  onChange={e => setNewActivity({...newActivity, titulo: e.target.value})} 
+                  required 
+                />
               </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Descripción / Instrucciones</label>
+                <textarea 
+                  className="w-full bg-gray-50 border border-gray-100 p-4 rounded-xl font-bold text-sm outline-none focus:ring-4 focus:ring-blue-500/10 transition-all h-28 resize-none" 
+                  placeholder="Instrucciones breves para el alumno..."
+                  value={newActivity.descripcion} 
+                  onChange={e => setNewActivity({...newActivity, descripcion: e.target.value})}
+                />
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
-                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Valor (0-10)</label>
-                  <input type="number" className="w-full bg-gray-50 border border-gray-100 p-4 rounded-xl font-bold text-sm" value={newActivity.puntos_max} onChange={e => setNewActivity({...newActivity, puntos_max: Number(e.target.value)})} />
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Puntaje Máximo (0-10)</label>
+                  <input 
+                    type="number" 
+                    className="w-full bg-gray-50 border border-gray-100 p-4 rounded-xl font-bold text-sm outline-none" 
+                    value={newActivity.puntos_max} 
+                    onChange={e => setNewActivity({...newActivity, puntos_max: Number(e.target.value)})} 
+                  />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Fecha</label>
-                  <input type="datetime-local" className="w-full bg-gray-50 border border-gray-100 p-4 rounded-xl font-bold text-xs" value={newActivity.fecha_entrega} onChange={e => setNewActivity({...newActivity, fecha_entrega: e.target.value})} required />
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Fecha Límite</label>
+                  <input 
+                    type="datetime-local" 
+                    className="w-full bg-gray-50 border border-gray-100 p-4 rounded-xl font-bold text-xs outline-none" 
+                    value={newActivity.fecha_entrega} 
+                    onChange={e => setNewActivity({...newActivity, fecha_entrega: e.target.value})} 
+                    required 
+                  />
                 </div>
               </div>
-              <button disabled={isSaving} className="w-full bg-[#003B5C] text-white py-5 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl">
-                {isSaving ? 'Guardando...' : 'Confirmar Cambios'}
+
+              <button 
+                disabled={isSaving} 
+                className="w-full bg-[#003B5C] text-white py-5 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl hover:bg-blue-600 transition-all active:scale-95 disabled:opacity-50"
+              >
+                {isSaving ? 'Sincronizando...' : (isEditing ? 'Actualizar Actividad' : 'Publicar Actividad')}
               </button>
-              <button type="button" onClick={() => setShowCreateModal(false)} className="w-full text-gray-400 font-bold text-[10px] uppercase py-2">Cerrar</button>
+              <button 
+                type="button" 
+                onClick={() => setShowCreateModal(false)} 
+                className="w-full text-gray-400 font-bold text-[10px] uppercase py-2 hover:text-gray-600 transition-colors"
+              >
+                Cancelar
+              </button>
             </form>
           </div>
         </div>
@@ -276,7 +336,7 @@ const ActivitiesModule: React.FC<ActivitiesModuleProps> = ({ userId, role }) => 
           <div className="bg-white rounded-[3rem] shadow-2xl w-full max-w-4xl h-[85vh] flex flex-col overflow-hidden">
             <div className="p-10 border-b flex justify-between items-center bg-gray-50/50">
               <h3 className="text-2xl font-black text-[#003B5C]">{evaluatingActivity.titulo}</h3>
-              <button onClick={() => setEvaluatingActivity(null)} className="text-2xl">✕</button>
+              <button onClick={() => setEvaluatingActivity(null)} className="text-2xl text-gray-400 hover:text-gray-900 transition-colors">✕</button>
             </div>
             <div className="flex-1 overflow-y-auto p-10 space-y-4">
               {activityStudents.map(student => (
@@ -285,13 +345,13 @@ const ActivitiesModule: React.FC<ActivitiesModuleProps> = ({ userId, role }) => 
                   <div className="flex items-center gap-4">
                     <input 
                       type="number" step="0.1" max={evaluatingActivity.puntos_max} 
-                      className="w-20 bg-gray-50 border p-3 rounded-xl text-center font-black" 
+                      className="w-20 bg-gray-50 border p-3 rounded-xl text-center font-black outline-none focus:ring-2 focus:ring-blue-500/20" 
                       value={grades[student.id]?.calificacion || 0} 
                       onChange={e => setGrades({...grades, [student.id]: { ...(grades[student.id] || {}), calificacion: Number(e.target.value) }})} 
                     />
                     <button 
                       onClick={() => setGrades({...grades, [student.id]: { ...(grades[student.id] || {}), entregado: !grades[student.id]?.entregado }})} 
-                      className={`px-4 py-2 rounded-xl text-[8px] font-black uppercase ${grades[student.id]?.entregado ? 'bg-emerald-500 text-white' : 'bg-gray-100 text-gray-400'}`}
+                      className={`px-4 py-2 rounded-xl text-[8px] font-black uppercase transition-all ${grades[student.id]?.entregado ? 'bg-emerald-500 text-white shadow-md' : 'bg-gray-100 text-gray-400'}`}
                     >
                       {grades[student.id]?.entregado ? 'Entregado' : 'Pendiente'}
                     </button>
@@ -300,8 +360,8 @@ const ActivitiesModule: React.FC<ActivitiesModuleProps> = ({ userId, role }) => 
               ))}
             </div>
             <div className="p-10 border-t flex justify-end gap-4 bg-gray-50/50">
-              <button onClick={() => setEvaluatingActivity(null)} className="text-gray-400 font-black text-xs uppercase">Cancelar</button>
-              <button onClick={handleSaveGrades} disabled={isSaving} className="bg-[#003B5C] text-white px-10 py-4 rounded-2xl font-black text-xs uppercase shadow-xl">
+              <button onClick={() => setEvaluatingActivity(null)} className="text-gray-400 font-black text-xs uppercase tracking-widest">Cancelar</button>
+              <button onClick={handleSaveGrades} disabled={isSaving} className="bg-[#003B5C] text-white px-10 py-4 rounded-2xl font-black text-xs uppercase shadow-xl hover:bg-blue-600 transition-all">
                 {isSaving ? 'Guardando...' : 'Guardar Calificaciones'}
               </button>
             </div>

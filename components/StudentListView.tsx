@@ -21,11 +21,8 @@ const StudentListView: React.FC<{ role: UserRole; userId: string }> = ({ role, u
     search: ''
   });
 
-  // Obtener semestres y grupos de forma sincronizada
   const fetchFilterMetadata = async () => {
     try {
-      // 1. Obtener Semestres para la Carrera Seleccionada
-      // Consultamos la tabla de materias para saber qué semestres existen realmente en ese programa
       let semQuery = supabase.from('materias').select('semestre');
       if (filters.career !== 'ALL') {
         semQuery = semQuery.eq('carrera', filters.career);
@@ -34,19 +31,15 @@ const StudentListView: React.FC<{ role: UserRole; userId: string }> = ({ role, u
       const { data: semData } = await semQuery;
       let uniqueSemesters: number[] = [];
       if (semData && semData.length > 0) {
-        // Fix: Explicitly type the mapping and sorting to avoid 'unknown' errors
-        uniqueSemesters = Array.from(new Set(semData.map((i: any) => Number(i.semestre)))).sort((a: number, b: number) => a - b);
+        // Fix: Explicitly type the Set and use Array.from to ensure proper inference to number[] for the unique semesters list
+        uniqueSemesters = Array.from(new Set<number>(semData.map((i: any) => Number(i.semestre)))).sort((a: number, b: number) => a - b);
       } else {
-        // Fallback si no hay materias cargadas aún
         uniqueSemesters = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
       }
       setAvailableSemesters(uniqueSemesters);
 
-      // 2. Obtener Grupos disponibles según Carrera y Semestre
-      // Buscamos en la tabla de estudiantes para ver qué grupos tienen alumnos inscritos
       let groupQuery = supabase.from('estudiantes').select('grupo');
       
-      // Si es docente, solo puede ver grupos asignados a él
       if (role === UserRole.DOCENTE) {
         const { data: teacherGroups } = await supabase.from('grupos').select('nombre_grupo').eq('docente_id', userId);
         const names = (teacherGroups || []).map(g => g.nombre_grupo);
@@ -61,11 +54,9 @@ const StudentListView: React.FC<{ role: UserRole; userId: string }> = ({ role, u
       if (filters.career !== 'ALL') groupQuery = groupQuery.eq('carrera', filters.career);
       if (filters.semester !== 'ALL') groupQuery = groupQuery.eq('semestre', parseInt(filters.semester));
       
-      // Obtenemos los grupos únicos. Usamos un límite alto para cubrir toda la matrícula
       const { data: groupData } = await groupQuery.limit(5000);
       
       if (groupData) {
-        // Fix: Explicitly type mapping and ensure g is string for localeCompare
         const uniqueGroups = Array.from(new Set(groupData.map((i: any) => i.grupo as string)))
           .filter((g): g is string => !!g)
           .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
@@ -120,15 +111,30 @@ const StudentListView: React.FC<{ role: UserRole; userId: string }> = ({ role, u
 
       const finalStudents = data.map(s => {
         const studentGrades = gradesData?.filter(g => g.estudiante_id === s.id) || [];
+        
         const calcAvg = (type: string) => {
           const filtered = studentGrades.filter(g => (g.actividades as any)?.tipo === type);
           return filtered.length === 0 ? 0 : filtered.reduce((acc, curr) => acc + Number(curr.calificacion), 0) / filtered.length;
         };
+
+        const avgExams = calcAvg(ActivityType.EXAMEN);
+        const avgTasks = calcAvg(ActivityType.TAREA);
+        const avgExercises = calcAvg(ActivityType.EJERCICIO);
+
+        // Calculamos un promedio "vivo" basado en lo que hay registrado
+        const activeCategories = [avgExams, avgTasks, avgExercises].filter(v => v > 0);
+        const liveAverage = activeCategories.length > 0 
+          ? activeCategories.reduce((a, b) => a + b, 0) / activeCategories.length 
+          : Number(s.promedio_acumulado);
+
+        // El riesgo se sincroniza con el promedio vivo y la asistencia
+        const dynamicRisk = calculateRisk(liveAverage, s.porcentaje_asistencia);
+
         return {
           id: s.id, name: s.nombre, career: s.carrera as any, semester: s.semestre, group: s.grupo, shift: s.turno as any,
-          average: Number(s.promedio_acumulado), attendance: s.porcentaje_asistencia, risk: s.nivel_riesgo as RiskLevel,
+          average: liveAverage, attendance: s.porcentaje_asistencia, risk: dynamicRisk,
           personalFactors: s.factores_personales || [], academicFactors: s.factores_academicos || [], institutionalFactors: s.factores_institucionales || [],
-          avgExams: calcAvg(ActivityType.EXAMEN), avgTasks: calcAvg(ActivityType.TAREA), avgExercises: calcAvg(ActivityType.EJERCICIO)
+          avgExams, avgTasks, avgExercises
         };
       });
       setStudents(finalStudents);
@@ -139,12 +145,10 @@ const StudentListView: React.FC<{ role: UserRole; userId: string }> = ({ role, u
     }
   };
 
-  // Re-sincronizar metadatos de filtros cuando cambian las selecciones padre
   useEffect(() => { 
     fetchFilterMetadata(); 
   }, [filters.career, filters.semester, userId, role]);
 
-  // Ejecutar búsqueda cuando cambie cualquier parámetro de filtrado
   useEffect(() => { 
     fetchFilteredStudents(); 
   }, [filters.career, filters.semester, filters.group, filters.search, userId, role]);
@@ -164,7 +168,6 @@ const StudentListView: React.FC<{ role: UserRole; userId: string }> = ({ role, u
           </div>
           
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {/* Filtro 1: Carrera */}
             <div className="space-y-1">
               <label className="text-[8px] font-black text-gray-400 uppercase tracking-widest ml-1">Licenciatura</label>
               <select 
@@ -177,7 +180,6 @@ const StudentListView: React.FC<{ role: UserRole; userId: string }> = ({ role, u
               </select>
             </div>
 
-            {/* Filtro 2: Semestre (Sincronizado con Carrera) */}
             <div className="space-y-1">
               <label className="text-[8px] font-black text-gray-400 uppercase tracking-widest ml-1">Ciclo/Semestre</label>
               <select 
@@ -190,7 +192,6 @@ const StudentListView: React.FC<{ role: UserRole; userId: string }> = ({ role, u
               </select>
             </div>
 
-            {/* Filtro 3: Grupo (Sincronizado con Carrera y Semestre) */}
             <div className="space-y-1">
               <label className="text-[8px] font-black text-gray-400 uppercase tracking-widest ml-1">Grupo Específico</label>
               <select 
@@ -203,7 +204,6 @@ const StudentListView: React.FC<{ role: UserRole; userId: string }> = ({ role, u
               </select>
             </div>
 
-            {/* Filtro 4: Búsqueda Nominal */}
             <div className="space-y-1">
               <label className="text-[8px] font-black text-gray-400 uppercase tracking-widest ml-1">Búsqueda Rápida</label>
               <input 
@@ -218,23 +218,24 @@ const StudentListView: React.FC<{ role: UserRole; userId: string }> = ({ role, u
         </div>
 
         <div className="w-full overflow-x-auto">
-          <table className="w-full text-left min-w-[1000px]">
+          <table className="w-full text-left min-w-[1100px]">
             <thead className="bg-[#003B5C]/5 text-[10px] font-black uppercase text-[#003B5C] border-b tracking-widest">
               <tr>
                 <th className="px-8 py-5">Nombre y Matrícula</th>
-                <th className="px-8 py-5">Ubicación Académica</th>
-                <th className="px-8 py-5">Asistencia</th>
-                <th className="px-6 py-5 text-center">Exámenes</th>
-                <th className="px-6 py-5 text-center">Tareas</th>
+                <th className="px-8 py-5">Ubicación</th>
+                <th className="px-6 py-5">Asistencia</th>
+                <th className="px-4 py-5 text-center">Exámenes</th>
+                <th className="px-4 py-5 text-center">Tareas</th>
+                <th className="px-4 py-5 text-center">Ejercicios</th>
                 <th className="px-8 py-5 text-center">Riesgo</th>
                 <th className="px-8 py-5 text-right">Ficha</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading ? (
-                <tr><td colSpan={7} className="py-20 text-center animate-pulse text-[10px] font-black text-gray-300 uppercase tracking-widest">Consultando base de datos FCQB...</td></tr>
+                <tr><td colSpan={8} className="py-20 text-center animate-pulse text-[10px] font-black text-gray-300 uppercase tracking-widest">Consultando base de datos FCQB...</td></tr>
               ) : students.length === 0 ? (
-                <tr><td colSpan={7} className="py-20 text-center text-gray-400 font-bold uppercase text-[10px] tracking-widest italic">No se encontraron registros coincidentes</td></tr>
+                <tr><td colSpan={8} className="py-20 text-center text-gray-400 font-bold uppercase text-[10px] tracking-widest italic">No se encontraron registros coincidentes</td></tr>
               ) : students.map((student) => (
                 <tr key={student.id} className="hover:bg-gray-50/80 transition-all">
                   <td className="px-8 py-5">
@@ -249,7 +250,7 @@ const StudentListView: React.FC<{ role: UserRole; userId: string }> = ({ role, u
                        <span className="text-[8px] font-black text-gray-400 uppercase">{student.career}</span>
                     </div>
                   </td>
-                  <td className="px-8 py-5">
+                  <td className="px-6 py-5">
                     <div className="flex items-center gap-2">
                        <div className="w-12 bg-gray-100 h-1.5 rounded-full overflow-hidden">
                           <div className={`h-full ${student.attendance < 80 ? 'bg-red-500' : 'bg-emerald-500'}`} style={{ width: `${student.attendance}%` }}></div>
@@ -257,11 +258,12 @@ const StudentListView: React.FC<{ role: UserRole; userId: string }> = ({ role, u
                        <span className="text-xs font-black">{student.attendance}%</span>
                     </div>
                   </td>
-                  <td className="px-6 py-5 text-center text-xs font-black text-blue-600">{student.avgExams ? student.avgExams.toFixed(1) : '-'}</td>
-                  <td className="px-6 py-5 text-center text-xs font-black text-indigo-600">{student.avgTasks ? student.avgTasks.toFixed(1) : '-'}</td>
+                  <td className="px-4 py-5 text-center text-xs font-black text-blue-600">{student.avgExams ? student.avgExams.toFixed(1) : '-'}</td>
+                  <td className="px-4 py-5 text-center text-xs font-black text-indigo-600">{student.avgTasks ? student.avgTasks.toFixed(1) : '-'}</td>
+                  <td className="px-4 py-5 text-center text-xs font-black text-amber-600">{student.avgExercises ? student.avgExercises.toFixed(1) : '-'}</td>
                   <td className="px-8 py-5 text-center">
-                    <span className={`px-4 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border ${RISK_COLORS[calculateRisk(student.average, student.attendance)]}`}>
-                      {RISK_LABELS[calculateRisk(student.average, student.attendance)]}
+                    <span className={`px-4 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border ${RISK_COLORS[student.risk]}`}>
+                      {RISK_LABELS[student.risk]}
                     </span>
                   </td>
                   <td className="px-8 py-5 text-right">
