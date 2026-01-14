@@ -9,13 +9,16 @@ import { supabase } from '../services/supabaseClient';
 const Dashboard: React.FC<{ role: UserRole; userId: string }> = ({ role, userId }) => {
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [students, setStudents] = useState<Student[]>([]);
+  const [totalEnrollment, setTotalEnrollment] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
 
   const fetchStudents = async () => {
     setLoading(true);
     try {
-      let query = supabase.from('estudiantes').select('*');
+      // Usamos count: 'exact' para obtener el total real de la base de datos
+      let query = supabase.from('estudiantes').select('*', { count: 'exact' });
+      
       if (role === UserRole.DOCENTE) {
         const { data: assignedGroups } = await supabase.from('grupos').select('nombre_grupo').eq('docente_id', userId);
         const groupNames = (assignedGroups || []).map(g => g.nombre_grupo);
@@ -23,13 +26,16 @@ const Dashboard: React.FC<{ role: UserRole; userId: string }> = ({ role, userId 
           query = query.in('grupo', groupNames);
         } else {
           setStudents([]);
+          setTotalEnrollment(0);
           setLoading(false);
           return;
         }
       }
-      const { data, error } = await query.order('nivel_riesgo', { ascending: false });
+      
+      const { data, error, count } = await query.order('nivel_riesgo', { ascending: false }).limit(100); // Limitamos la vista pero el count es exacto
       if (error) throw error;
       
+      setTotalEnrollment(count || 0);
       setStudents((data || []).map(s => ({
         id: s.id, name: s.nombre, career: s.carrera as any, semester: s.semestre,
         group: s.grupo, shift: s.turno as any, average: Number(s.promedio_acumulado),
@@ -78,10 +84,9 @@ const Dashboard: React.FC<{ role: UserRole; userId: string }> = ({ role, userId 
 
   return (
     <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8 animate-in fade-in duration-500">
-      {/* Banner Principal Docente con Logotipos Institucionales */}
+      {/* Banner Principal Docente */}
       {role === UserRole.DOCENTE && (
         <div className="bg-[#003B5C] p-8 sm:p-12 rounded-xl text-white shadow-xl relative overflow-hidden">
-            {/* Escudo UAS de Fondo - Sin filtros, ruta relativa corregida */}
             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] opacity-[0.15] pointer-events-none select-none">
                <img src="images/uas_escudo.png" alt="" className="w-full h-full object-contain" />
             </div>
@@ -100,8 +105,8 @@ const Dashboard: React.FC<{ role: UserRole; userId: string }> = ({ role, userId 
                 
                 <p className="text-blue-100 text-sm sm:text-lg font-medium max-w-2xl opacity-80 leading-relaxed">
                   {highRiskCount > 0 
-                    ? `Atención: Se han detectado ${highRiskCount} estudiantes con métricas de riesgo alto en sus grupos asignados. Es necesaria una intervención oportuna.` 
-                    : "Los grupos bajo su tutoría muestran una trayectoria académica estable y cumplimiento de metas."}
+                    ? `Atención: Se han detectado ${highRiskCount} estudiantes con métricas de riesgo alto en sus grupos asignados.` 
+                    : "Los grupos bajo su tutoría muestran una trayectoria académica estable."}
                 </p>
                 
                 <div className="mt-8 flex flex-wrap justify-center lg:justify-start gap-4">
@@ -112,25 +117,16 @@ const Dashboard: React.FC<{ role: UserRole; userId: string }> = ({ role, userId 
                   >
                     {syncing ? 'Procesando...' : 'Sincronizar Semáforos'}
                   </button>
-                  <button className="bg-white/10 backdrop-blur-md border border-white/20 text-white px-8 py-4 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-white/20 transition-all">
-                    Generar Reporte de Unidad
-                  </button>
                 </div>
-              </div>
-
-              <div className="hidden lg:block relative">
-                 <div className="w-56 h-56 flex items-center justify-center p-4 bg-white/5 rounded-full border border-white/10 backdrop-blur-sm">
-                    <img src="images/uas_escudo.png" alt="UAS" className="max-w-full max-h-full object-contain drop-shadow-2xl" />
-                 </div>
               </div>
             </div>
         </div>
       )}
 
-      {/* Grid de Métricas Cuantitativas */}
+      {/* Grid de Métricas con Matrícula Real */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
         {[
-          { label: 'Matrícula Total', value: students.length, icon: '🎓', color: UAS_COLORS.NAVY },
+          { label: 'Matrícula Total', value: totalEnrollment, icon: '🎓', color: UAS_COLORS.NAVY },
           { label: 'Riesgo Crítico', value: highRiskCount, icon: '⚠️', color: '#ef4444' },
           { label: 'Asistencia Gral.', value: `${students.length ? Math.round(students.reduce((a, b) => a + b.attendance, 0) / students.length) : 0}%`, icon: '📊', color: '#10b981' },
           { label: 'Promedio Gral.', value: students.length ? (students.reduce((a, b) => a + b.average, 0) / students.length).toFixed(1) : '0.0', icon: '📈', color: '#3b82f6' },
@@ -147,17 +143,13 @@ const Dashboard: React.FC<{ role: UserRole; userId: string }> = ({ role, userId 
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Tabla Resumen de Alumnos Críticos */}
         <div className="lg:col-span-2 space-y-6">
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
             <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-white rounded-lg p-1 flex items-center justify-center border border-gray-200">
-                     <img src="images/fcqb_logo.png" alt="" className="max-w-full max-h-full object-contain" />
-                  </div>
                   <h3 className="text-lg font-black text-[#003B5C] tracking-tight">Estudiantes Prioritarios</h3>
                </div>
-               <button onClick={fetchStudents} className="text-[10px] font-black uppercase text-blue-600 tracking-widest hover:underline">Ver Todos</button>
+               <button onClick={fetchStudents} className="text-[10px] font-black uppercase text-blue-600 tracking-widest hover:underline">Refrescar</button>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-left">
@@ -165,12 +157,12 @@ const Dashboard: React.FC<{ role: UserRole; userId: string }> = ({ role, userId 
                   <tr>
                     <th className="px-8 py-4">Estudiante</th>
                     <th className="px-8 py-4">Grupo</th>
-                    <th className="px-8 py-4">Riesgo (Real)</th>
+                    <th className="px-8 py-4">Riesgo</th>
                     <th className="px-8 py-4 text-right">Ficha</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {students.slice(0, 6).map((student) => {
+                  {students.slice(0, 8).map((student) => {
                     const realRisk = calculateRisk(student.average, student.attendance);
                     return (
                       <tr key={student.id} className="hover:bg-blue-50/20 transition-all">
@@ -200,7 +192,6 @@ const Dashboard: React.FC<{ role: UserRole; userId: string }> = ({ role, userId 
           </div>
         </div>
 
-        {/* Distribución Grupal (Pie Chart) */}
         <div className="bg-white p-8 rounded-xl shadow-sm border border-gray-200">
            <h3 className="text-lg font-black text-[#003B5C] mb-6 tracking-tight">Estatus de Matrícula</h3>
            <div className="h-64 relative">
@@ -213,20 +204,9 @@ const Dashboard: React.FC<{ role: UserRole; userId: string }> = ({ role, userId 
                 </PieChart>
               </ResponsiveContainer>
               <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                 <span className="text-2xl font-black text-gray-900">{students.length}</span>
+                 <span className="text-2xl font-black text-gray-900">{totalEnrollment}</span>
                  <span className="text-[8px] font-black text-gray-400 uppercase tracking-widest">Alumnos</span>
               </div>
-           </div>
-           <div className="mt-8 space-y-3">
-              {statsData.map((stat, i) => (
-                <div key={i} className="flex justify-between items-center p-3 rounded-lg bg-gray-50 border border-gray-100">
-                  <div className="flex items-center gap-3">
-                    <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: stat.color }}></div>
-                    <span className="text-[9px] font-black text-gray-600 uppercase tracking-widest">{stat.name}</span>
-                  </div>
-                  <span className="font-black text-gray-900 text-sm">{stat.value}</span>
-                </div>
-              ))}
            </div>
         </div>
       </div>
