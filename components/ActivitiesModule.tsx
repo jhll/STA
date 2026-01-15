@@ -180,7 +180,6 @@ const ActivitiesModule: React.FC<ActivitiesModuleProps> = ({ userId, role }) => 
           <div key={activity.id} className="bg-white rounded-[2.5rem] border border-gray-100 shadow-sm hover:shadow-2xl transition-all group overflow-hidden flex flex-col relative">
              <div className={`h-3 ${activity.tipo === ActivityType.EXAMEN ? 'bg-red-500' : activity.tipo === ActivityType.TAREA ? 'bg-blue-500' : 'bg-amber-500'}`}></div>
              
-             {/* Acciones Rápidas Siempre Visibles en Hover */}
              <div className="absolute top-6 right-6 flex gap-2">
                 <button 
                   onClick={() => handleOpenEdit(activity)} 
@@ -241,19 +240,20 @@ const ActivitiesModule: React.FC<ActivitiesModuleProps> = ({ userId, role }) => 
           <div className="bg-white rounded-[3.5rem] shadow-2xl w-full max-w-xl p-12 overflow-y-auto max-h-[90vh]">
             <h3 className="text-2xl font-black text-[#003B5C] mb-8">{isEditing ? 'Actualizar Actividad' : 'Nueva Actividad'}</h3>
             <form onSubmit={handleSaveActivity} className="space-y-6">
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Grupo Asignado</label>
+                <select 
+                  className="w-full bg-gray-50 border border-gray-100 p-4 rounded-xl font-bold text-sm outline-none focus:ring-4 focus:ring-blue-500/10 transition-all" 
+                  value={newActivity.grupo_id} 
+                  onChange={e => setNewActivity({...newActivity, grupo_id: e.target.value})} 
+                  required
+                >
+                  <option value="">Selecciona el grupo...</option>
+                  {assignedGroups.map(g => <option key={g.id} value={g.id}>{g.nombre_grupo} - {g.materias?.nombre}</option>)}
+                </select>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Grupo Asignado</label>
-                  <select 
-                    className="w-full bg-gray-50 border border-gray-100 p-4 rounded-xl font-bold text-sm outline-none focus:ring-4 focus:ring-blue-500/10 transition-all" 
-                    value={newActivity.grupo_id} 
-                    onChange={e => setNewActivity({...newActivity, grupo_id: e.target.value})} 
-                    required
-                  >
-                    <option value="">Selecciona...</option>
-                    {assignedGroups.map(g => <option key={g.id} value={g.id}>{g.nombre_grupo} - {g.materias?.nombre}</option>)}
-                  </select>
-                </div>
                 <div className="space-y-1">
                   <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Tipo de Actividad</label>
                   <select 
@@ -266,6 +266,19 @@ const ActivitiesModule: React.FC<ActivitiesModuleProps> = ({ userId, role }) => 
                     <option value={ActivityType.EJERCICIO}>Ejercicio</option>
                     <option value={ActivityType.EXAMEN}>Examen</option>
                   </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Unidad Académica</label>
+                  <input 
+                    type="number" 
+                    min="1" 
+                    max="10"
+                    className="w-full bg-gray-50 border border-gray-100 p-4 rounded-xl font-bold text-sm outline-none focus:ring-4 focus:ring-blue-500/10 transition-all" 
+                    placeholder="Ej: 1"
+                    value={newActivity.unidad} 
+                    onChange={e => setNewActivity({...newActivity, unidad: Number(e.target.value)})} 
+                    required 
+                  />
                 </div>
               </div>
 
