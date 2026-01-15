@@ -122,7 +122,8 @@ const AdminPanel: React.FC = () => {
         
         if (error) throw error;
         
-        const unique = Array.from(new Set((data || []).map(s => s.grupo))).filter(g => !!g).sort();
+        // Fix: Explicitly type the map and use a type guard to ensure unique is inferred as string[]
+        const unique = Array.from(new Set((data || []).map((s: any) => s.grupo as string))).filter((g): g is string => !!g).sort();
         setStudentGroupsDetected(unique);
       } catch (err) {
         console.error("Error fetching student groups:", err);

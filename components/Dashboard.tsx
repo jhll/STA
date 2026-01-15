@@ -1,10 +1,13 @@
-
 import React, { useState, useEffect } from 'react';
 import { RISK_COLORS, RISK_LABELS, calculateRisk, UAS_COLORS } from '../constants';
 import { Student, RiskLevel, UserRole } from '../types';
 import StudentProfile from './StudentProfile';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { supabase } from '../services/supabaseClient';
+
+// Definición de rutas de activos como constantes de cadena
+const uasEscudo = './images/uas_escudo.png';
+const fcqbLogo = './images/fcqb_logo.png';
 
 const Dashboard: React.FC<{ role: UserRole; userId: string }> = ({ role, userId }) => {
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
@@ -16,7 +19,6 @@ const Dashboard: React.FC<{ role: UserRole; userId: string }> = ({ role, userId 
   const fetchStudents = async () => {
     setLoading(true);
     try {
-      // Usamos count: 'exact' para obtener el total real de la base de datos
       let query = supabase.from('estudiantes').select('*', { count: 'exact' });
       
       if (role === UserRole.DOCENTE) {
@@ -32,7 +34,7 @@ const Dashboard: React.FC<{ role: UserRole; userId: string }> = ({ role, userId 
         }
       }
       
-      const { data, error, count } = await query.order('nivel_riesgo', { ascending: false }).limit(100); // Limitamos la vista pero el count es exacto
+      const { data, error, count } = await query.order('nivel_riesgo', { ascending: false }).limit(100);
       if (error) throw error;
       
       setTotalEnrollment(count || 0);
@@ -88,14 +90,14 @@ const Dashboard: React.FC<{ role: UserRole; userId: string }> = ({ role, userId 
       {role === UserRole.DOCENTE && (
         <div className="bg-[#003B5C] p-8 sm:p-12 rounded-xl text-white shadow-xl relative overflow-hidden">
             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] opacity-[0.15] pointer-events-none select-none">
-               <img src="images/uas_escudo.png" alt="" className="w-full h-full object-contain" />
+               <img src={uasEscudo} alt="" className="w-full h-full object-contain" />
             </div>
 
             <div className="relative z-10 flex flex-col lg:flex-row justify-between items-center gap-10">
               <div className="text-center lg:text-left">
                 <div className="flex flex-col lg:flex-row items-center gap-4 mb-6">
                    <div className="w-24 h-24 bg-white rounded-xl p-2 shadow-lg flex items-center justify-center border border-gray-100">
-                      <img src="images/fcqb_logo.png" alt="FCQB" className="max-w-full max-h-full object-contain" />
+                      <img src={fcqbLogo} alt="FCQB" className="max-w-full max-h-full object-contain" />
                    </div>
                    <div>
                       <h2 className="text-3xl sm:text-4xl font-black tracking-tighter">Bienvenido, Docente FCQB</h2>

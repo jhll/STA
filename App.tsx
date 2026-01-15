@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { UserRole } from './types';
 import Dashboard from './components/Dashboard';
@@ -8,6 +7,9 @@ import AnalyticsView from './components/AnalyticsView';
 import StudentListView from './components/StudentListView';
 import ActivitiesModule from './components/ActivitiesModule';
 import Login from './components/Login';
+
+// Definición de rutas de activos como constantes de cadena para evitar problemas de resolución de módulos ESM
+const fcqbLogo = './images/fcqb_logo.png';
 
 const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -63,7 +65,7 @@ const App: React.FC = () => {
 
               <div className="flex items-center gap-3 cursor-pointer" onClick={() => { setActiveView('dashboard'); setIsMenuOpen(false); }}>
                 <div className="w-14 h-14 bg-white rounded-lg flex items-center justify-center p-1 shadow-inner border border-gray-200">
-                   <img src="images/fcqb_logo.png" alt="FCQB" className="max-w-full max-h-full object-contain" />
+                   <img src={fcqbLogo} alt="FCQB" className="max-w-full max-h-full object-contain" />
                 </div>
                 <div className="flex flex-col">
                   <span className="text-xl font-black text-white tracking-tighter leading-none">STA-FCQB</span>
@@ -108,7 +110,7 @@ const App: React.FC = () => {
           <div className="fixed top-0 left-0 bottom-0 w-72 bg-[#003B5C] z-[60] lg:hidden animate-in slide-in-from-left duration-300 flex flex-col p-6 shadow-2xl">
             <div className="flex items-center gap-3 mb-10 pb-6 border-b border-white/10">
               <div className="w-12 h-12 bg-white rounded-lg flex items-center justify-center p-1">
-                 <img src="images/fcqb_logo.png" alt="FCQB" className="max-w-full max-h-full object-contain" />
+                 <img src={fcqbLogo} alt="FCQB" className="max-w-full max-h-full object-contain" />
               </div>
               <span className="text-xl font-black text-white tracking-tighter">STA-FCQB</span>
             </div>

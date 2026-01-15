@@ -1,7 +1,10 @@
-
 import React, { useState } from 'react';
 import { UserRole } from '../types';
 import { supabase } from '../services/supabaseClient';
+
+// Definición de rutas de activos como constantes de cadena
+const uasEscudo = './images/uas_escudo.png';
+const fcqbLogo = './images/fcqb_logo.png';
 
 interface LoginProps {
   onLogin: (role: UserRole, name: string, id: string) => void;
@@ -48,22 +51,22 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
       {/* Elementos decorativos institucionales */}
       <div className="absolute top-0 right-0 w-1/2 h-full bg-[#003B5C] hidden lg:block transform skew-x-12 translate-x-32 origin-top"></div>
       
-      {/* Escudo UAS Gigante de Fondo - Ruta relativa corregida y sin filtros */}
+      {/* Escudo UAS Gigante de Fondo */}
       <div className="absolute -left-20 -bottom-20 w-[600px] h-[600px] opacity-[0.08] hidden lg:block pointer-events-none select-none">
-         <img src="images/uas_escudo.png" alt="" className="w-full h-full object-contain" />
+         <img src={uasEscudo} alt="" className="w-full h-full object-contain" />
       </div>
 
       <div className="max-w-md w-full relative z-10">
         <div className="bg-white rounded-2xl shadow-2xl p-8 sm:p-12 border border-gray-100">
           <div className="text-center mb-10">
-            {/* Logos de Cabecera - Sin filtros y tamaño natural con contenedores visibles */}
+            {/* Logos de Cabecera */}
             <div className="flex justify-center items-center gap-6 mb-8">
                <div className="w-20 h-20 flex items-center justify-center">
-                  <img src="images/uas_escudo.png" alt="UAS" className="max-w-full max-h-full object-contain" />
+                  <img src={uasEscudo} alt="UAS" className="max-w-full max-h-full object-contain" />
                </div>
                <div className="h-12 w-px bg-gray-200"></div>
                <div className="w-20 h-20 flex items-center justify-center p-1 bg-gray-50 rounded-lg">
-                  <img src="images/fcqb_logo.png" alt="FCQB" className="max-w-full max-h-full object-contain" />
+                  <img src={fcqbLogo} alt="FCQB" className="max-w-full max-h-full object-contain" />
                </div>
             </div>
 
