@@ -21,6 +21,16 @@ const App: React.FC = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [activeCycle, setActiveCycle] = useState<CicloEscolar | null>(null);
 
+  // Estados para Cambio de Contraseña
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [passwordForm, setPasswordForm] = useState({
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: ''
+  });
+  const [passwordLoading, setPasswordLoading] = useState(false);
+  const [passwordError, setPasswordError] = useState('');
+
   const fetchActiveCycle = async () => {
     try {
       const { data, error } = await supabase
@@ -69,7 +79,56 @@ const App: React.FC = () => {
     setActiveCycle(null);
   };
 
-  // Definición clara de items de navegación por rol (DISEÑADOR IA ELIMINADO)
+  const handleUpdatePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordError('');
+    
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      setPasswordError('La nueva contraseña y su confirmación no coinciden.');
+      return;
+    }
+
+    if (passwordForm.newPassword.length < 4) {
+      setPasswordError('La contraseña debe tener al menos 4 caracteres.');
+      return;
+    }
+
+    setPasswordLoading(true);
+    try {
+      // 1. Verificar contraseña actual
+      const { data: user, error: fetchError } = await supabase
+        .from('docentes')
+        .select('password')
+        .eq('id', userId)
+        .single();
+
+      if (fetchError || !user) throw new Error('No se pudo verificar el usuario.');
+
+      if (user.password !== passwordForm.currentPassword) {
+        setPasswordError('La contraseña actual es incorrecta.');
+        setPasswordLoading(false);
+        return;
+      }
+
+      // 2. Actualizar a la nueva contraseña
+      const { error: updateError } = await supabase
+        .from('docentes')
+        .update({ password: passwordForm.newPassword })
+        .eq('id', userId);
+
+      if (updateError) throw updateError;
+
+      alert('✅ Contraseña actualizada correctamente.');
+      setShowPasswordModal(false);
+      setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+    } catch (err: any) {
+      setPasswordError(err.message || 'Error al actualizar la contraseña.');
+    } finally {
+      setPasswordLoading(false);
+    }
+  };
+
+  // Definición clara de items de navegación por rol
   const navItems = [
     { id: 'dashboard', label: 'Inicio', icon: '🏠', roles: [UserRole.ADMIN, UserRole.DOCENTE, UserRole.TUTOR] },
     { id: 'student-list', label: 'Matrícula', icon: '📋', roles: [UserRole.ADMIN, UserRole.TUTOR, UserRole.DOCENTE] },
@@ -138,7 +197,7 @@ const App: React.FC = () => {
             </div>
 
             {/* Perfil de Usuario */}
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3">
               <div className="hidden sm:flex flex-col items-end mr-2">
                 <p className="text-xs font-black text-white">{String(userName)}</p>
                 <div className="flex items-center gap-2">
@@ -148,15 +207,28 @@ const App: React.FC = () => {
                    </span>
                 </div>
               </div>
-              <button 
-                onClick={handleLogout} 
-                className="w-11 h-11 bg-white/10 rounded-xl flex items-center justify-center text-white hover:bg-red-600 transition-all border border-white/10 group"
-                title="Cerrar Sesión"
-              >
-                <svg className="w-5 h-5 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path>
-                </svg>
-              </button>
+              
+              <div className="flex items-center gap-2">
+                {/* Botón Cambio Contraseña */}
+                <button 
+                  onClick={() => setShowPasswordModal(true)}
+                  className="w-11 h-11 bg-white/10 rounded-xl flex items-center justify-center text-white hover:bg-[#FFD100] hover:text-[#003B5C] transition-all border border-white/10 group"
+                  title="Cambiar Contraseña"
+                >
+                  <span className="text-xl group-hover:scale-110 transition-transform">🔑</span>
+                </button>
+
+                {/* Botón Logout */}
+                <button 
+                  onClick={handleLogout} 
+                  className="w-11 h-11 bg-white/10 rounded-xl flex items-center justify-center text-white hover:bg-red-600 transition-all border border-white/10 group"
+                  title="Cerrar Sesión"
+                >
+                  <svg className="w-5 h-5 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path>
+                  </svg>
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -201,6 +273,13 @@ const App: React.FC = () => {
                     {String(item.label)}
                   </button>
                ))}
+               <button 
+                  onClick={() => { setShowPasswordModal(true); setIsMenuOpen(false); }}
+                  className="w-full px-6 py-5 rounded-2xl text-[11px] font-black uppercase tracking-widest transition-all flex items-center gap-5 text-blue-100 hover:bg-white/5"
+                >
+                  <span className="text-xl">🔑</span>
+                  Contraseña
+                </button>
             </div>
 
             <div className="absolute bottom-10 left-6 right-6">
@@ -250,6 +329,77 @@ const App: React.FC = () => {
           {activeView === 'analytics' && <AnalyticsView />}
         </div>
       </main>
+
+      {/* MODAL CAMBIO DE CONTRASEÑA */}
+      {showPasswordModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-[110] p-4">
+          <div className="bg-white rounded-[3rem] shadow-2xl w-full max-w-md p-10 animate-in zoom-in-95">
+            <div className="text-center mb-8">
+              <span className="text-4xl mb-4 block">🔑</span>
+              <h3 className="text-2xl font-black text-[#003B5C] tracking-tight">Cambiar Contraseña</h3>
+              <p className="text-gray-400 font-bold text-[10px] uppercase tracking-widest mt-1">Actualiza tus credenciales de acceso</p>
+            </div>
+            
+            <form onSubmit={handleUpdatePassword} className="space-y-5">
+              <div className="space-y-1">
+                <label className="text-[9px] font-black text-gray-400 uppercase tracking-widest ml-1">Contraseña Actual</label>
+                <input 
+                  type="password" 
+                  className="w-full bg-gray-50 border border-gray-200 p-4 rounded-2xl text-sm font-bold outline-none focus:ring-4 focus:ring-blue-500/10 transition-all"
+                  value={passwordForm.currentPassword}
+                  onChange={e => setPasswordForm({...passwordForm, currentPassword: e.target.value})}
+                  required
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[9px] font-black text-gray-400 uppercase tracking-widest ml-1">Nueva Contraseña</label>
+                <input 
+                  type="password" 
+                  className="w-full bg-gray-50 border border-gray-200 p-4 rounded-2xl text-sm font-bold outline-none focus:ring-4 focus:ring-blue-500/10 transition-all"
+                  value={passwordForm.newPassword}
+                  onChange={e => setPasswordForm({...passwordForm, newPassword: e.target.value})}
+                  required
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[9px] font-black text-gray-400 uppercase tracking-widest ml-1">Confirmar Nueva Contraseña</label>
+                <input 
+                  type="password" 
+                  className="w-full bg-gray-50 border border-gray-200 p-4 rounded-2xl text-sm font-bold outline-none focus:ring-4 focus:ring-blue-500/10 transition-all"
+                  value={passwordForm.confirmPassword}
+                  onChange={e => setPasswordForm({...passwordForm, confirmPassword: e.target.value})}
+                  required
+                />
+              </div>
+
+              {passwordError && (
+                <div className="bg-red-50 text-red-600 text-[10px] font-bold p-4 rounded-xl border border-red-100 text-center animate-pulse">
+                  ⚠️ {passwordError}
+                </div>
+              )}
+
+              <div className="pt-4 space-y-3">
+                <button 
+                  type="submit" 
+                  disabled={passwordLoading}
+                  className="w-full bg-[#003B5C] text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl hover:bg-blue-600 transition-all disabled:opacity-50"
+                >
+                  {passwordLoading ? 'Procesando...' : 'Actualizar Contraseña'}
+                </button>
+                <button 
+                  type="button" 
+                  onClick={() => { setShowPasswordModal(false); setPasswordError(''); }}
+                  className="w-full text-gray-400 font-bold text-[10px] uppercase py-2 hover:text-gray-600 transition-colors"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* FOOTER */}
       <footer className="bg-[#003B5C] py-12 text-white border-t-4 border-[#FFD100] mt-auto">

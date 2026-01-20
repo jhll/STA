@@ -21,6 +21,8 @@ const AdminPanel: React.FC = () => {
   const [editingSubjectId, setEditingSubjectId] = useState<string | null>(null);
   const [isEditingUser, setIsEditingUser] = useState(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  const [isEditingGroup, setIsEditingGroup] = useState(false);
+  const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   
   const [teachers, setTeachers] = useState<any[]>([]);
   const [cycles, setCycles] = useState<CicloEscolar[]>([]);
@@ -204,6 +206,40 @@ const AdminPanel: React.FC = () => {
     loadAllData();
   }, [activeTab]);
 
+  const resetGroupForm = () => {
+    setNewGroup({
+      nombre_grupo: '',
+      materia_id: '',
+      docente_id: '',
+      turno: 'Matutino',
+      ciclo_id: activeCycleId || ''
+    });
+    setIsEditingGroup(false);
+    setEditingGroupId(null);
+  };
+
+  const handleEditGroup = (g: any) => {
+    setNewGroup({
+      nombre_grupo: g.nombre_grupo,
+      materia_id: g.materia_id,
+      docente_id: g.docente_id,
+      turno: g.turno,
+      ciclo_id: g.ciclo_id
+    });
+    setEditingGroupId(g.id);
+    setIsEditingGroup(true);
+    setShowGroupModal(true);
+  };
+
+  const handleDeleteGroup = async (id: string) => {
+    if (!confirm("¿Deseas eliminar esta carga docente?")) return;
+    try {
+      const { error } = await supabase.from('grupos').delete().eq('id', id);
+      if (error) throw error;
+      fetchGroups();
+    } catch (err: any) { alert(err.message); }
+  };
+
   const handleCreateGroup = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newGroup.materia_id || !newGroup.docente_id || !newGroup.nombre_grupo) {
@@ -212,9 +248,15 @@ const AdminPanel: React.FC = () => {
     }
     setIsSaving(true);
     try {
-      const { error } = await supabase.from('grupos').insert([newGroup]);
-      if (error) throw error;
-      alert("✅ Carga docente asignada correctamente.");
+      if (isEditingGroup && editingGroupId) {
+        const { error } = await supabase.from('grupos').update(newGroup).eq('id', editingGroupId);
+        if (error) throw error;
+        alert("✅ Carga docente actualizada correctamente.");
+      } else {
+        const { error } = await supabase.from('grupos').insert([newGroup]);
+        if (error) throw error;
+        alert("✅ Carga docente asignada correctamente.");
+      }
       setShowGroupModal(false);
       fetchGroups();
     } catch (err: any) { alert(err.message); } finally { setIsSaving(false); }
@@ -278,6 +320,18 @@ const AdminPanel: React.FC = () => {
     }
   };
 
+  const handleDeleteUser = async (id: string) => {
+    if (!confirm("¿Deseas eliminar a este integrante del personal? Esta acción eliminará también sus asignaciones de carga y tutoría.")) return;
+    try {
+      const { error } = await supabase.from('docentes').delete().eq('id', id);
+      if (error) throw error;
+      fetchTeachers();
+      alert("🗑️ Usuario eliminado correctamente.");
+    } catch (err: any) {
+      alert("Error al eliminar usuario: " + err.message);
+    }
+  };
+
   const resetUserForm = () => {
     setNewUser({ numero_empleado: '', nombre: '', email: '', password: '', rol: [UserRole.DOCENTE] });
     setIsEditingUser(false);
@@ -334,6 +388,18 @@ const AdminPanel: React.FC = () => {
     setEditingSubjectId(subject.id);
     setIsEditingSubject(true);
     setShowSubjectModal(true);
+  };
+
+  const handleDeleteSubject = async (id: string) => {
+    if (!confirm("¿Deseas eliminar esta materia? Esta acción es irreversible y afectará las asignaciones de carga docente vinculadas.")) return;
+    try {
+      const { error } = await supabase.from('materias').delete().eq('id', id);
+      if (error) throw error;
+      fetchSubjects();
+      alert("🗑️ Materia eliminada correctamente.");
+    } catch (err: any) {
+      alert("Error al eliminar materia: " + err.message);
+    }
   };
 
   const handleCreateSubject = async (e: React.FormEvent) => {
@@ -502,7 +568,7 @@ const AdminPanel: React.FC = () => {
               <button onClick={() => { setIsEditingSubject(false); setShowSubjectModal(true); }} className="bg-[#FFD100] text-[#003B5C] px-8 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl hover:scale-105 transition-all">+ Nueva Materia</button>
             )}
             {activeTab === 'assignments' && (
-              <button onClick={() => setShowGroupModal(true)} className="bg-[#FFD100] text-[#003B5C] px-8 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl hover:scale-105 transition-all">+ Nueva Carga</button>
+              <button onClick={() => { resetGroupForm(); setShowGroupModal(true); }} className="bg-[#FFD100] text-[#003B5C] px-8 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl hover:scale-105 transition-all">+ Nueva Carga</button>
             )}
             {activeTab === 'tutor-assignments' && (
               <button onClick={() => setShowTutorModal(true)} className="bg-[#FFD100] text-[#003B5C] px-8 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl hover:scale-105 transition-all">+ Nueva Tutoría</button>
@@ -544,8 +610,9 @@ const AdminPanel: React.FC = () => {
                                 <span key={r} className="px-2 py-1 bg-blue-50 text-blue-700 text-[8px] font-black uppercase border rounded-lg">{r}</span>
                               ))}
                             </td>
-                            <td className="px-10 py-5 text-right opacity-0 group-hover:opacity-100 transition-opacity">
-                              <button onClick={() => handleEditUser(t)} className="p-2 text-blue-600">✏️</button>
+                            <td className="px-10 py-5 text-right opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                              <button onClick={() => handleEditUser(t)} className="p-2 text-blue-600" title="Editar">✏️</button>
+                              <button onClick={() => handleDeleteUser(t.id)} className="p-2 text-red-500" title="Eliminar">🗑️</button>
                             </td>
                           </tr>
                         ))}
@@ -630,13 +697,14 @@ const AdminPanel: React.FC = () => {
                             <th className="px-10 py-5">Grupo</th>
                             <th className="px-10 py-5">Turno</th>
                             <th className="px-10 py-5">Ciclo</th>
+                            <th className="px-10 py-5 text-right">Acciones</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
                           {filteredGroups.length === 0 ? (
-                            <tr><td colSpan={5} className="py-20 text-center text-gray-300 font-black uppercase">Sin resultados con estos filtros</td></tr>
+                            <tr><td colSpan={6} className="py-20 text-center text-gray-300 font-black uppercase">Sin resultados con estos filtros</td></tr>
                           ) : filteredGroups.map(g => (
-                            <tr key={g.id} className="hover:bg-gray-50 text-[12px]">
+                            <tr key={g.id} className="hover:bg-gray-50 text-[12px] group">
                               <td className="px-10 py-5">
                                 <div className="flex flex-col">
                                   <span className="font-bold text-gray-900">{getRelation(g.materias)?.nombre}</span>
@@ -647,6 +715,10 @@ const AdminPanel: React.FC = () => {
                               <td className="px-10 py-5 font-mono">{g.nombre_grupo}</td>
                               <td className="px-10 py-5 text-gray-500">{g.turno}</td>
                               <td className="px-10 py-5 text-[10px] font-black text-gray-400 uppercase tracking-widest">{getRelation(g.ciclos_escolares)?.nombre}</td>
+                              <td className="px-10 py-5 text-right opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                                <button onClick={() => handleEditGroup(g)} className="p-2 text-blue-600" title="Editar">✏️</button>
+                                <button onClick={() => handleDeleteGroup(g.id)} className="p-2 text-red-500" title="Eliminar">🗑️</button>
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -728,7 +800,7 @@ const AdminPanel: React.FC = () => {
                             <th className="px-8 py-5">Código</th>
                             <th className="px-8 py-5">Materia</th>
                             <th className="px-8 py-5">Programa</th>
-                            <th className="px-8 py-5 text-right">Acción</th>
+                            <th className="px-8 py-5 text-right">Acciones</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
@@ -736,9 +808,10 @@ const AdminPanel: React.FC = () => {
                             <tr key={s.id} className="hover:bg-gray-50 text-[12px] group">
                               <td className="px-8 py-5 font-mono font-black text-blue-600">{s.codigo}</td>
                               <td className="px-8 py-5 font-bold text-gray-900">{s.nombre}</td>
-                              <td className="px-8 py-5 text-gray-400 font-medium text-[10px] uppercase">{s.carrera} • {s.semestre}°</td>
-                              <td className="px-8 py-5 text-right opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button onClick={() => handleEditSubject(s)} className="p-2 text-blue-600">✏️</button>
+                              <td className="px-8 py-5 text-gray-400 font-medium text-[10px] uppercase">{s.carrera} • {s.semester}°</td>
+                              <td className="px-8 py-5 text-right opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                                <button onClick={() => handleEditSubject(s)} className="p-2 text-blue-600" title="Editar">✏️</button>
+                                <button onClick={() => handleDeleteSubject(s.id)} className="p-2 text-red-500" title="Eliminar">🗑️</button>
                               </td>
                             </tr>
                           ))}
@@ -860,7 +933,7 @@ const AdminPanel: React.FC = () => {
       {showGroupModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-[110] p-4">
           <div className="bg-white rounded-[3.5rem] shadow-2xl w-full max-w-2xl p-10 animate-in zoom-in-95 overflow-y-auto max-h-[90vh]">
-            <h3 className="text-2xl font-black text-[#003B5C] mb-8">Nueva Carga Docente</h3>
+            <h3 className="text-2xl font-black text-[#003B5C] mb-8">{isEditingGroup ? 'Editar Carga Docente' : 'Nueva Carga Docente'}</h3>
             <form onSubmit={handleCreateGroup} className="space-y-6">
               
               <div className="bg-blue-50/50 p-6 rounded-3xl border border-blue-100 space-y-4">
@@ -892,7 +965,7 @@ const AdminPanel: React.FC = () => {
                 >
                   <option value="">Selecciona Materia de la lista filtrada...</option>
                   {modalFilteredSubjects.map(s => (
-                    <option key={s.id} value={s.id}>{s.nombre} ({s.carrera} - {s.semestre}°)</option>
+                    <option key={s.id} value={s.id}>{s.nombre} ({s.carrera} - {s.semester}°)</option>
                   ))}
                 </select>
               </div>
@@ -937,7 +1010,7 @@ const AdminPanel: React.FC = () => {
               </div>
 
               <button disabled={isSaving || !activeCycleId} className="w-full bg-[#003B5C] text-white py-5 rounded-2xl font-black text-xs uppercase shadow-xl disabled:opacity-50">
-                {isSaving ? 'Guardando...' : 'Confirmar Carga Docente'}
+                {isSaving ? 'Guardando...' : (isEditingGroup ? 'Actualizar Carga Docente' : 'Confirmar Carga Docente')}
               </button>
               <button type="button" onClick={() => setShowGroupModal(false)} className="w-full text-gray-400 font-bold text-[10px] uppercase">Cancelar</button>
             </form>
@@ -1019,7 +1092,7 @@ const AdminPanel: React.FC = () => {
       {/* MODAL USUARIO */}
       {showUserModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-[110] p-4">
-          <div className="bg-white rounded-[3.5rem] shadow-2xl w-full max-w-md p-10 animate-in zoom-in-95">
+          <div className="bg-white rounded-[3.5rem] shadow-2xl w-full max-md p-10 animate-in zoom-in-95">
             <h3 className="text-2xl font-black text-[#003B5C] mb-8">{isEditingUser ? 'Editar Personal' : 'Nuevo Personal'}</h3>
             <form onSubmit={handleCreateUser} className="space-y-6">
               <input type="text" className="w-full bg-gray-50 border p-4 rounded-2xl font-bold text-sm" placeholder="Número de Empleado" value={newUser.numero_empleado} onChange={e => setNewUser({...newUser, numero_empleado: e.target.value})} required />
