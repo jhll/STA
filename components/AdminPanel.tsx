@@ -27,8 +27,10 @@ const AdminPanel: React.FC = () => {
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [groups, setGroups] = useState<any[]>([]);
+  const [tutorias, setTutorias] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeCycleId, setActiveCycleId] = useState<string | null>(null);
+  const [activeCycleName, setActiveCycleName] = useState<string | null>(null);
   
   // Metadatos de grupos existentes en la matrícula
   const [groupsMetadata, setGroupsMetadata] = useState<{grupo: string, carrera: string, semestre: number, turno: string}[]>([]);
@@ -46,7 +48,7 @@ const AdminPanel: React.FC = () => {
     semester: 'ALL'
   });
 
-  // Filtros locales para el modal de nueva carga
+  // Filtros locales para el modal de nueva carga/tutoría
   const [modalAssignmentFilters, setModalAssignmentFilters] = useState({
     career: '',
     semester: 'ALL'
@@ -77,6 +79,13 @@ const AdminPanel: React.FC = () => {
     ciclo_id: ''
   });
 
+  // Formulario de nueva tutoría
+  const [newTutoria, setNewTutoria] = useState({
+    nombre_grupo: '',
+    tutor_id: '',
+    ciclo_id: ''
+  });
+
   // Formulario de nueva materia
   const [newSubject, setNewSubject] = useState({
     codigo: '',
@@ -104,9 +113,12 @@ const AdminPanel: React.FC = () => {
       const active = data?.find(c => c.es_activo);
       if (active) {
         setActiveCycleId(active.id);
+        setActiveCycleName(active.nombre);
         setNewGroup(prev => ({ ...prev, ciclo_id: active.id }));
+        setNewTutoria(prev => ({ ...prev, ciclo_id: active.id }));
       } else {
         setActiveCycleId(null);
+        setActiveCycleName(null);
       }
     } catch (err) { console.error(err); }
   };
@@ -163,6 +175,17 @@ const AdminPanel: React.FC = () => {
     } catch (err) { console.error(err); }
   };
 
+  const fetchTutorias = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('tutorias')
+        .select('*, docentes(nombre), ciclos_escolares(nombre)')
+        .order('nombre_grupo', { ascending: true });
+      if (error) throw error;
+      setTutorias(data || []);
+    } catch (err) { console.error(err); }
+  };
+
   const loadAllData = async () => {
     setLoading(true);
     await Promise.all([
@@ -170,7 +193,8 @@ const AdminPanel: React.FC = () => {
       fetchCycles(),
       fetchSubjects(),
       fetchGroups(),
-      fetchExistingGroupNames()
+      fetchExistingGroupNames(),
+      fetchTutorias()
     ]);
     if (activeTab === 'students') await fetchStudents();
     setLoading(false);
@@ -194,6 +218,37 @@ const AdminPanel: React.FC = () => {
       setShowGroupModal(false);
       fetchGroups();
     } catch (err: any) { alert(err.message); } finally { setIsSaving(false); }
+  };
+
+  const handleCreateTutoria = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTutoria.tutor_id || !newTutoria.nombre_grupo) {
+      alert("Completa todos los campos para asignar la tutoría.");
+      return;
+    }
+    setIsSaving(true);
+    try {
+      const { error } = await supabase.from('tutorias').insert([newTutoria]);
+      if (error) throw error;
+      alert("✅ Tutoría asignada correctamente.");
+      setShowTutorModal(false);
+      fetchTutorias();
+    } catch (err: any) { 
+      if (err.message.includes('unique_tutoria_grupo_ciclo')) {
+        alert("❌ Este grupo ya tiene un tutor asignado para este ciclo.");
+      } else {
+        alert(err.message); 
+      }
+    } finally { setIsSaving(false); }
+  };
+
+  const handleDeleteTutoria = async (id: string) => {
+    if (!confirm("¿Deseas eliminar esta asignación de tutoría?")) return;
+    try {
+      const { error } = await supabase.from('tutorias').delete().eq('id', id);
+      if (error) throw error;
+      fetchTutorias();
+    } catch (err: any) { alert(err.message); }
   };
 
   const handleCreateUser = async (e: React.FormEvent) => {
@@ -402,14 +457,20 @@ const AdminPanel: React.FC = () => {
     return careerMatch && semesterMatch;
   });
 
-  const handleSelectExistingGroup = (groupName: string) => {
+  // Filtrar docentes que tienen rol de TUTOR
+  const tutorTeachers = teachers.filter(t => {
+    const roles = Array.isArray(t.rol) ? t.rol : [t.rol];
+    return roles.includes(UserRole.TUTOR);
+  });
+
+  const handleSelectExistingGroup = (groupName: string, isForTutoria: boolean = false) => {
     const found = groupsMetadata.find(gm => gm.grupo === groupName);
     if (found) {
-      setNewGroup({
-        ...newGroup,
-        nombre_grupo: found.grupo,
-        turno: found.turno
-      });
+      if (isForTutoria) {
+        setNewTutoria({ ...newTutoria, nombre_grupo: found.grupo });
+      } else {
+        setNewGroup({ ...newGroup, nombre_grupo: found.grupo, turno: found.turno });
+      }
     }
   };
 
@@ -417,9 +478,17 @@ const AdminPanel: React.FC = () => {
     <div className="max-w-7xl mx-auto p-4 md:p-8 space-y-8">
       <div className="bg-white rounded-[2.5rem] shadow-2xl border border-gray-100 overflow-hidden">
         <div className="p-10 bg-[#003B5C] text-white flex flex-col md:flex-row justify-between items-center gap-6">
-          <div>
-            <h2 className="text-4xl font-black tracking-tighter">Administración STA</h2>
-            <p className="text-blue-100 opacity-80 font-medium text-sm uppercase tracking-widest">Configuración Maestra FCQB</p>
+          <div className="flex flex-col md:flex-row items-center gap-6">
+            <div>
+              <h2 className="text-4xl font-black tracking-tighter">Administración STA</h2>
+              <p className="text-blue-100 opacity-80 font-medium text-sm uppercase tracking-widest">Configuración Maestra FCQB</p>
+            </div>
+            {activeCycleName && (
+              <div className="bg-[#FFD100] text-[#003B5C] px-6 py-2 rounded-full font-black text-[10px] uppercase tracking-widest shadow-lg">
+                <span className="opacity-60 mr-2">Ciclo Activo:</span>
+                {activeCycleName}
+              </div>
+            )}
           </div>
           <div className="flex gap-3">
             <button onClick={() => setShowSqlModal(true)} className="bg-white/10 hover:bg-white/20 px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border border-white/20 transition-all">Esquema DB</button>
@@ -435,6 +504,9 @@ const AdminPanel: React.FC = () => {
             {activeTab === 'assignments' && (
               <button onClick={() => setShowGroupModal(true)} className="bg-[#FFD100] text-[#003B5C] px-8 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl hover:scale-105 transition-all">+ Nueva Carga</button>
             )}
+            {activeTab === 'tutor-assignments' && (
+              <button onClick={() => setShowTutorModal(true)} className="bg-[#FFD100] text-[#003B5C] px-8 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl hover:scale-105 transition-all">+ Nueva Tutoría</button>
+            )}
           </div>
         </div>
 
@@ -444,6 +516,7 @@ const AdminPanel: React.FC = () => {
             { id: 'ciclos', label: 'Ciclos' },
             { id: 'subjects', label: 'Materias' },
             { id: 'assignments', label: 'Carga Docente' },
+            { id: 'tutor-assignments', label: 'Tutorías' },
             { id: 'students', label: 'Matrícula' }
           ].map(tab => (
             <button key={tab.id} onClick={() => setActiveTab(tab.id as any)} className={`px-10 py-5 text-[11px] font-black uppercase tracking-widest border-b-2 transition-all whitespace-nowrap ${activeTab === tab.id ? 'text-blue-600 border-blue-600 bg-white' : 'text-gray-400'}`}>{tab.label}</button>
@@ -473,6 +546,46 @@ const AdminPanel: React.FC = () => {
                             </td>
                             <td className="px-10 py-5 text-right opacity-0 group-hover:opacity-100 transition-opacity">
                               <button onClick={() => handleEditUser(t)} className="p-2 text-blue-600">✏️</button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                </div>
+              )}
+
+              {activeTab === 'ciclos' && (
+                <div className="bg-white border rounded-[2rem] overflow-hidden shadow-sm overflow-x-auto">
+                    <table className="w-full text-left">
+                      <thead className="bg-gray-50 text-[10px] font-black uppercase text-gray-400 border-b tracking-widest">
+                        <tr><th className="px-10 py-5">Periodo Escolar</th><th className="px-10 py-5">Fecha Inicio</th><th className="px-10 py-5">Estatus</th><th className="px-10 py-5 text-right">Acción</th></tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {cycles.map(c => (
+                          <tr key={c.id} className={`hover:bg-gray-50 text-[12px] transition-all ${c.es_activo ? 'bg-blue-50/50 border-l-4 border-emerald-500' : ''}`}>
+                            <td className="px-10 py-5 font-bold text-gray-900">
+                              <div className="flex items-center gap-3">
+                                {c.nombre}
+                                {c.es_activo && <span className="text-emerald-500 text-lg">✅</span>}
+                              </div>
+                            </td>
+                            <td className="px-10 py-5 font-medium text-gray-500">{new Date(c.fecha_inicio).toLocaleDateString()}</td>
+                            <td className="px-10 py-5">
+                              {c.es_activo ? (
+                                <span className="px-4 py-1.5 bg-emerald-600 text-white text-[9px] font-black uppercase rounded-full shadow-md">ACTIVO ACTUALMENTE</span>
+                              ) : (
+                                <span className="px-4 py-1.5 bg-gray-100 text-gray-400 text-[9px] font-black uppercase rounded-full border border-gray-200">Inactivo</span>
+                              )}
+                            </td>
+                            <td className="px-10 py-5 text-right">
+                              {!c.es_activo && (
+                                <button 
+                                  onClick={() => handleSetActiveCycle(c.id)} 
+                                  className="bg-blue-600 text-white px-6 py-2 rounded-xl text-[10px] font-black uppercase hover:bg-blue-700 transition-all shadow-lg"
+                                >
+                                  ESTABLECER ACTIVO
+                                </button>
+                              )}
                             </td>
                           </tr>
                         ))}
@@ -539,6 +652,35 @@ const AdminPanel: React.FC = () => {
                         </tbody>
                       </table>
                   </div>
+                </div>
+              )}
+
+              {activeTab === 'tutor-assignments' && (
+                <div className="bg-white border rounded-[2rem] overflow-hidden shadow-sm overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead className="bg-gray-50 text-[10px] font-black uppercase text-gray-400 border-b tracking-widest">
+                      <tr>
+                        <th className="px-10 py-5">Tutor Asignado</th>
+                        <th className="px-10 py-5">Grupo Bajo Cargo</th>
+                        <th className="px-10 py-5">Ciclo Escolar</th>
+                        <th className="px-10 py-5 text-right">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {tutorias.length === 0 ? (
+                        <tr><td colSpan={4} className="py-20 text-center text-gray-300 font-black uppercase tracking-widest">No hay tutorías asignadas</td></tr>
+                      ) : tutorias.map(t => (
+                        <tr key={t.id} className="hover:bg-gray-50 text-[12px] group">
+                          <td className="px-10 py-5 font-bold text-gray-900">{getRelation(t.docentes)?.nombre}</td>
+                          <td className="px-10 py-5 font-mono font-black text-blue-600">Grupo {t.nombre_grupo}</td>
+                          <td className="px-10 py-5 text-gray-500">{getRelation(t.ciclos_escolares)?.nombre}</td>
+                          <td className="px-10 py-5 text-right">
+                            <button onClick={() => handleDeleteTutoria(t.id)} className="text-red-400 hover:text-red-600 transition-colors opacity-0 group-hover:opacity-100">🗑️ Eliminar</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
 
@@ -650,6 +792,70 @@ const AdminPanel: React.FC = () => {
         </div>
       </div>
 
+      {/* MODAL ASIGNAR TUTORÍA */}
+      {showTutorModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-[110] p-4">
+          <div className="bg-white rounded-[3.5rem] shadow-2xl w-full max-w-2xl p-10 animate-in zoom-in-95">
+            <h3 className="text-2xl font-black text-[#003B5C] mb-8">Nueva Asignación de Tutoría</h3>
+            <form onSubmit={handleCreateTutoria} className="space-y-6">
+              
+              <div className="bg-amber-50/50 p-6 rounded-3xl border border-amber-100 space-y-4">
+                <p className="text-[10px] font-black text-amber-800 uppercase tracking-widest">Paso 1: Localizar Grupo de Matrícula</p>
+                <div className="grid grid-cols-2 gap-4">
+                  <select 
+                    className="bg-white border border-amber-200 p-4 rounded-2xl text-xs font-bold outline-none"
+                    value={modalAssignmentFilters.career}
+                    onChange={e => setModalAssignmentFilters({...modalAssignmentFilters, career: e.target.value, semester: 'ALL'})}
+                  >
+                    <option value="">Cualquier Carrera...</option>
+                    {CAREERS.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                  <select 
+                    className="bg-white border border-amber-200 p-4 rounded-2xl text-xs font-bold outline-none"
+                    value={modalAssignmentFilters.semester}
+                    onChange={e => setModalAssignmentFilters({...modalAssignmentFilters, semester: e.target.value})}
+                  >
+                    <option value="ALL">Cualquier Semestre...</option>
+                    {[1,2,3,4,5,6,7,8,9,10].map(s => <option key={s} value={s}>{s}° Semestre</option>)}
+                  </select>
+                </div>
+                
+                <select 
+                  className="w-full bg-white border border-amber-200 p-4 rounded-2xl font-bold text-sm outline-none" 
+                  value={newTutoria.nombre_grupo} 
+                  onChange={e => handleSelectExistingGroup(e.target.value, true)} 
+                  required
+                >
+                  <option value="">Selecciona Grupo de la lista filtrada...</option>
+                  {modalFilteredExistingGroups.map(gm => (
+                    <option key={gm.grupo} value={gm.grupo}>Grupo {gm.grupo} ({gm.carrera} - {gm.semestre}°)</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-4">
+                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Paso 2: Datos del Tutor</p>
+                
+                <select 
+                  className="w-full bg-gray-50 border p-4 rounded-2xl font-bold text-sm outline-none" 
+                  value={newTutoria.tutor_id} 
+                  onChange={e => setNewTutoria({...newTutoria, tutor_id: e.target.value})} 
+                  required
+                >
+                  <option value="">Selecciona Docente (Solo roles TUTOR)...</option>
+                  {tutorTeachers.map(t => <option key={t.id} value={t.id}>{t.nombre}</option>)}
+                </select>
+              </div>
+
+              <button disabled={isSaving || !activeCycleId} className="w-full bg-[#003B5C] text-white py-5 rounded-2xl font-black text-xs uppercase shadow-xl disabled:opacity-50">
+                {isSaving ? 'Guardando...' : 'Confirmar Asignación de Tutoría'}
+              </button>
+              <button type="button" onClick={() => setShowTutorModal(false)} className="w-full text-gray-400 font-bold text-[10px] uppercase">Cancelar</button>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* MODAL ASIGNAR CARGA (CON SINCRONIZACIÓN DE GRUPOS) */}
       {showGroupModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-[110] p-4">
@@ -746,8 +952,16 @@ const AdminPanel: React.FC = () => {
             <h3 className="text-2xl font-black text-[#003B5C] mb-8">Nuevo Ciclo Escolar</h3>
             <form onSubmit={handleCreateCycle} className="space-y-6">
               <input type="text" className="w-full bg-gray-50 border p-4 rounded-2xl font-bold text-sm" placeholder="Nombre (Ej: 2024-2025 I)" value={newCycle.nombre} onChange={e => setNewCycle({...newCycle, nombre: e.target.value})} required />
-              <input type="date" className="w-full bg-gray-50 border p-4 rounded-2xl font-bold text-sm" value={newCycle.fecha_inicio} onChange={e => setNewCycle({...newCycle, fecha_inicio: e.target.value})} required />
-              <input type="date" className="w-full bg-gray-50 border p-4 rounded-2xl font-bold text-sm" value={newCycle.fecha_fin} onChange={e => setNewCycle({...newCycle, fecha_fin: e.target.value})} required />
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Fecha Inicio</label>
+                  <input type="date" className="w-full bg-gray-50 border p-4 rounded-2xl font-bold text-sm" value={newCycle.fecha_inicio} onChange={e => setNewCycle({...newCycle, fecha_inicio: e.target.value})} required />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Fecha Fin</label>
+                  <input type="date" className="w-full bg-gray-50 border p-4 rounded-2xl font-bold text-sm" value={newCycle.fecha_fin} onChange={e => setNewCycle({...newCycle, fecha_fin: e.target.value})} required />
+                </div>
+              </div>
               <button disabled={isSaving} className="w-full bg-[#003B5C] text-white py-5 rounded-2xl font-black text-xs uppercase shadow-xl">{isSaving ? 'Guardando...' : 'Crear Ciclo'}</button>
               <button type="button" onClick={() => setShowCycleModal(false)} className="w-full text-gray-400 font-bold text-[10px] uppercase">Cancelar</button>
             </form>
@@ -797,6 +1011,44 @@ const AdminPanel: React.FC = () => {
               </div>
               <button disabled={isSaving} className="w-full bg-[#003B5C] text-white py-5 rounded-2xl font-black text-xs uppercase shadow-xl">{isSaving ? 'Guardando...' : 'Confirmar'}</button>
               <button type="button" onClick={closeSubjectModal} className="w-full text-gray-400 font-bold text-[10px] uppercase">Cancelar</button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL USUARIO */}
+      {showUserModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-[110] p-4">
+          <div className="bg-white rounded-[3.5rem] shadow-2xl w-full max-w-md p-10 animate-in zoom-in-95">
+            <h3 className="text-2xl font-black text-[#003B5C] mb-8">{isEditingUser ? 'Editar Personal' : 'Nuevo Personal'}</h3>
+            <form onSubmit={handleCreateUser} className="space-y-6">
+              <input type="text" className="w-full bg-gray-50 border p-4 rounded-2xl font-bold text-sm" placeholder="Número de Empleado" value={newUser.numero_empleado} onChange={e => setNewUser({...newUser, numero_empleado: e.target.value})} required />
+              <input type="text" className="w-full bg-gray-50 border p-4 rounded-2xl font-bold text-sm" placeholder="Nombre Completo" value={newUser.nombre} onChange={e => setNewUser({...newUser, nombre: e.target.value})} required />
+              <input type="email" className="w-full bg-gray-50 border p-4 rounded-2xl font-bold text-sm" placeholder="Correo UAS" value={newUser.email} onChange={e => setNewUser({...newUser, email: e.target.value})} required />
+              <input type="text" className="w-full bg-gray-50 border p-4 rounded-2xl font-bold text-sm" placeholder="Password" value={newUser.password} onChange={e => setNewUser({...newUser, password: e.target.value})} required />
+              
+              <div className="space-y-2">
+                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Roles de Usuario</p>
+                <div className="flex flex-wrap gap-2">
+                  {[UserRole.ADMIN, UserRole.DOCENTE, UserRole.TUTOR].map(role => (
+                    <button 
+                      key={role}
+                      type="button"
+                      onClick={() => {
+                        const current = newUser.rol;
+                        const next = current.includes(role) ? current.filter(r => r !== role) : [...current, role];
+                        setNewUser({...newUser, rol: next});
+                      }}
+                      className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${newUser.rol.includes(role) ? 'bg-blue-600 text-white shadow-md' : 'bg-gray-100 text-gray-400'}`}
+                    >
+                      {role}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <button disabled={isSaving} className="w-full bg-[#003B5C] text-white py-5 rounded-2xl font-black text-xs uppercase shadow-xl">{isSaving ? 'Guardando...' : 'Confirmar'}</button>
+              <button type="button" onClick={() => setShowUserModal(false)} className="w-full text-gray-400 font-bold text-[10px] uppercase">Cancelar</button>
             </form>
           </div>
         </div>

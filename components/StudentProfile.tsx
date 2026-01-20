@@ -11,12 +11,21 @@ interface StudentProfileProps {
   onClose: () => void;
 }
 
+interface AcademicRecord {
+  materia: string;
+  promedio: number;
+  asistencia: number;
+  estatus: 'Aprobado' | 'En Riesgo' | 'Pendiente';
+}
+
 const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, onClose }) => {
   const [activeTab, setActiveTab] = useState<'info' | 'academic' | 'ai' | 'interventions'>('info');
   const [aiAnalysis, setAiAnalysis] = useState<any>(null);
   const [loadingAi, setLoadingAi] = useState(false);
   const [interventions, setInterventions] = useState<any[]>([]);
   const [loadingInterventions, setLoadingInterventions] = useState(false);
+  const [academicHistory, setAcademicHistory] = useState<AcademicRecord[]>([]);
+  const [loadingAcademic, setLoadingAcademic] = useState(false);
   
   const [showAddIntervention, setShowAddIntervention] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -25,6 +34,83 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, onClose 
     description: '',
     additionalNotes: ''
   });
+
+  const getRelation = (data: any) => Array.isArray(data) ? data[0] : data;
+
+  const fetchRealAcademicHistory = async () => {
+    setLoadingAcademic(true);
+    try {
+      // 1. Obtener todas las calificaciones del alumno con info de materia
+      const { data: gradesData, error: gradesError } = await supabase
+        .from('calificaciones')
+        .select(`
+          calificacion,
+          actividades (
+            id,
+            puntos_max,
+            grupos (
+              id,
+              nombre_grupo,
+              materias (nombre)
+            )
+          )
+        `)
+        .eq('estudiante_id', student.id);
+
+      if (gradesError) throw gradesError;
+
+      // 2. Obtener asistencias por grupo
+      const { data: attendanceData, error: attError } = await supabase
+        .from('asistencias')
+        .select('grupo_id, presente')
+        .eq('estudiante_id', student.id);
+
+      if (attError) throw attError;
+
+      // 3. Procesar y agrupar por materia
+      const historyMap: Record<string, { totalGrade: number, count: number, grupo_id: string }> = {};
+      
+      gradesData?.forEach(g => {
+        const activity = getRelation(g.actividades);
+        const grupo = getRelation(activity?.grupos);
+        const materia = getRelation(grupo?.materias);
+        const materiaNombre = materia?.nombre || 'Materia Desconocida';
+
+        if (!historyMap[materiaNombre]) {
+          historyMap[materiaNombre] = { totalGrade: 0, count: 0, grupo_id: grupo?.id };
+        }
+        
+        // Normalizar calificación a base 10 si puntos_max es diferente
+        const normalizedGrade = (g.calificacion / (activity?.puntos_max || 10)) * 10;
+        historyMap[materiaNombre].totalGrade += normalizedGrade;
+        historyMap[materiaNombre].count += 1;
+      });
+
+      const processedHistory: AcademicRecord[] = Object.keys(historyMap).map(materiaName => {
+        const info = historyMap[materiaName];
+        const avg = info.totalGrade / info.count;
+        
+        // Calcular asistencia específica para este grupo/materia
+        const relevantAtt = attendanceData?.filter(a => a.grupo_id === info.grupo_id) || [];
+        const attPerc = relevantAtt.length > 0 
+          ? (relevantAtt.filter(a => a.presente).length / relevantAtt.length) * 100 
+          : 100;
+
+        return {
+          materia: materiaName,
+          promedio: Number(avg.toFixed(1)),
+          asistencia: Math.round(attPerc),
+          estatus: (avg >= 7.0 && attPerc >= 80) ? 'Aprobado' : 'En Riesgo'
+        };
+      });
+
+      setAcademicHistory(processedHistory);
+    } catch (err) {
+      console.error("Error al sincronizar historial:", err);
+    } finally {
+      setLoadingAcademic(false);
+    }
+  };
 
   const fetchInterventions = async () => {
     setLoadingInterventions(true);
@@ -53,6 +139,7 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, onClose 
   useEffect(() => {
     if (activeTab === 'ai' && !aiAnalysis) fetchAiAnalysis();
     if (activeTab === 'interventions') fetchInterventions();
+    if (activeTab === 'academic') fetchRealAcademicHistory();
   }, [activeTab]);
 
   const handleSaveIntervention = async () => {
@@ -103,7 +190,6 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, onClose 
     }
   };
 
-  // Solo ADMIN y TUTOR ven el Historial Académico Completo
   const canSeeAcademicHistory = role === UserRole.ADMIN || role === UserRole.TUTOR;
 
   const tabs = [
@@ -112,6 +198,8 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, onClose 
     { id: 'ai', label: 'Análisis IA', icon: '✨' },
     { id: 'interventions', label: 'Bitácora', icon: '🛠️' },
   ];
+
+  const approvedCount = academicHistory.filter(h => h.promedio >= 7.0).length;
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
@@ -204,15 +292,25 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, onClose 
           {activeTab === 'academic' && canSeeAcademicHistory && (
             <div className="space-y-6 animate-in fade-in duration-300">
               <div className="bg-blue-600 p-6 rounded-2xl text-white shadow-lg mb-4">
-                 <h4 className="font-black text-xs uppercase tracking-widest opacity-80 mb-2">Resumen de Trayectoria</h4>
+                 <h4 className="font-black text-xs uppercase tracking-widest opacity-80 mb-2">Resumen de Trayectoria Real</h4>
                  <div className="flex gap-10">
                     <div>
-                       <span className="text-[10px] font-bold block uppercase opacity-70">Créditos Totales</span>
-                       <span className="text-xl font-black">154 / 320</span>
+                       <span className="text-[10px] font-bold block uppercase opacity-70">Asignaturas Cursadas</span>
+                       <span className="text-xl font-black">{academicHistory.length}</span>
                     </div>
                     <div>
                        <span className="text-[10px] font-bold block uppercase opacity-70">Regularidad</span>
-                       <span className="text-xl font-black">Alumno Regular</span>
+                       <span className="text-xl font-black">
+                         {approvedCount === academicHistory.length ? 'Regular' : 'Con Adeudos'}
+                       </span>
+                    </div>
+                    <div>
+                       <span className="text-[10px] font-bold block uppercase opacity-70">Promedio de Ciclo</span>
+                       <span className="text-xl font-black">
+                         {academicHistory.length > 0 
+                            ? (academicHistory.reduce((a,b) => a + b.promedio, 0) / academicHistory.length).toFixed(1) 
+                            : '0.0'}
+                       </span>
                     </div>
                  </div>
               </div>
@@ -222,27 +320,28 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, onClose 
                   <thead className="bg-gray-50/50 text-[10px] font-black uppercase text-gray-400 border-b tracking-widest">
                     <tr>
                       <th className="px-8 py-5">Asignatura</th>
-                      <th className="px-8 py-5 text-center">Calificación</th>
-                      <th className="px-8 py-5 text-center">Faltas</th>
+                      <th className="px-8 py-5 text-center">Promedio Actividades</th>
+                      <th className="px-8 py-5 text-center">Asistencia Real</th>
                       <th className="px-8 py-5 text-right">Estatus</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {[
-                      { name: 'Química Orgánica II', grade: 8.5, absences: 2, status: 'Aprobado' },
-                      { name: 'Bioquímica I', grade: 9.0, absences: 0, status: 'Aprobado' },
-                      { name: 'Cálculo Multivariado', grade: 6.5, absences: 5, status: 'En Riesgo' },
-                      { name: 'Biología Celular', grade: 7.8, absences: 1, status: 'Aprobado' },
-                    ].map((course, idx) => (
+                    {loadingAcademic ? (
+                      <tr><td colSpan={4} className="py-20 text-center animate-pulse font-black text-gray-300 uppercase text-[10px]">Calculando historial real...</td></tr>
+                    ) : academicHistory.length === 0 ? (
+                      <tr><td colSpan={4} className="py-20 text-center text-gray-300 font-black uppercase text-[10px]">Sin actividades evaluadas en este ciclo</td></tr>
+                    ) : academicHistory.map((course, idx) => (
                       <tr key={idx} className="hover:bg-gray-50 transition-colors">
-                        <td className="px-8 py-5 font-bold text-gray-800 text-sm">{course.name}</td>
-                        <td className="px-8 py-5 font-black text-gray-900 text-center">{course.grade}</td>
-                        <td className="px-8 py-5 text-gray-500 text-center font-bold">{course.absences}</td>
+                        <td className="px-8 py-5 font-bold text-gray-800 text-sm">{course.materia}</td>
+                        <td className="px-8 py-5 font-black text-gray-900 text-center">{course.promedio}</td>
+                        <td className="px-8 py-5 text-gray-500 text-center font-bold">{course.asistencia}%</td>
                         <td className="px-8 py-5 text-right">
                           <span className={`px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest ${
-                            course.status === 'En Riesgo' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
+                            course.eststatus === 'En Riesgo' || course.promedio < 7.0 || course.asistencia < 80 
+                              ? 'bg-red-100 text-red-700' 
+                              : 'bg-green-100 text-green-700'
                           }`}>
-                            {course.status}
+                            {course.promedio < 7.0 || course.asistencia < 80 ? 'En Riesgo' : 'Aprobado'}
                           </span>
                         </td>
                       </tr>
