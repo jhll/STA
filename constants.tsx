@@ -13,7 +13,7 @@ export const UAS_COLORS = {
 export const CAREERS = [
   'Ingeniería Química',
   'Ingeniería Bioquímica',
-  'Química Farmacéutico Biólogo',
+  'Químico Farmacéutico Biólogo',
   'Biotecnología Genómica'
 ];
 

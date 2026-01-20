@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Student, RiskLevel, Intervention, UserRole } from '../types';
+import { Student, RiskLevel, UserRole } from '../types';
 import { RISK_COLORS, RISK_LABELS } from '../constants';
 import { analyzeStudentRisk } from '../services/geminiService';
 import { supabase } from '../services/supabaseClient';
@@ -51,12 +51,8 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, onClose 
   };
 
   useEffect(() => {
-    if (activeTab === 'ai' && !aiAnalysis) {
-      fetchAiAnalysis();
-    }
-    if (activeTab === 'interventions') {
-      fetchInterventions();
-    }
+    if (activeTab === 'ai' && !aiAnalysis) fetchAiAnalysis();
+    if (activeTab === 'interventions') fetchInterventions();
   }, [activeTab]);
 
   const handleSaveIntervention = async () => {
@@ -107,18 +103,19 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, onClose 
     }
   };
 
+  // Solo ADMIN y TUTOR ven el Historial Académico Completo
+  const canSeeAcademicHistory = role === UserRole.ADMIN || role === UserRole.TUTOR;
+
   const tabs = [
     { id: 'info', label: 'Integral', icon: '👤' },
-    // Ocultar historial académico para docentes
-    ...(role === UserRole.ADMIN ? [{ id: 'academic', label: 'Académico', icon: '📚' }] : []),
+    ...(canSeeAcademicHistory ? [{ id: 'academic', label: 'Historial', icon: '📚' }] : []),
     { id: 'ai', label: 'Análisis IA', icon: '✨' },
     { id: 'interventions', label: 'Bitácora', icon: '🛠️' },
   ];
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
-        {/* Header */}
         <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-white sticky top-0">
           <div className="flex items-center gap-4">
             <div className={`w-16 h-16 rounded-2xl flex items-center justify-center text-white text-2xl font-black shadow-lg ${
@@ -128,7 +125,7 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, onClose 
             </div>
             <div>
               <h2 className="text-2xl font-black text-gray-900 tracking-tight">{student.name}</h2>
-              <p className="text-gray-500 font-medium">{student.career} • Semestre {student.semester}</p>
+              <p className="text-gray-500 font-medium uppercase text-[10px] tracking-widest">{student.career} • Semestre {student.semester}</p>
             </div>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full text-gray-400 transition-colors">
@@ -136,7 +133,6 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, onClose 
           </button>
         </div>
 
-        {/* Tabs */}
         <div className="flex border-b border-gray-100 bg-gray-50/50">
           {tabs.map((tab) => (
             <button
@@ -152,7 +148,6 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, onClose 
           ))}
         </div>
 
-        {/* Content */}
         <div className="flex-1 overflow-y-auto p-8 bg-white">
           {activeTab === 'info' && (
             <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
@@ -162,60 +157,74 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, onClose 
                   <p className="text-lg font-black">{RISK_LABELS[student.risk as RiskLevel]}</p>
                 </div>
                 <div className="p-6 rounded-2xl bg-blue-50 border border-blue-100 shadow-sm">
-                  <p className="text-[10px] uppercase font-black text-blue-800 opacity-60 tracking-widest mb-1">Puntaje Académico</p>
+                  <p className="text-[10px] uppercase font-black text-blue-800 opacity-60 tracking-widest mb-1">Promedio Gral</p>
                   <p className="text-lg font-black text-blue-900">{student.average.toFixed(1)} / 10.0</p>
                 </div>
                 <div className="p-6 rounded-2xl bg-indigo-50 border border-indigo-100 shadow-sm">
-                  <p className="text-[10px] uppercase font-black text-indigo-800 opacity-60 tracking-widest mb-1">Nivel Asistencia</p>
+                  <p className="text-[10px] uppercase font-black text-indigo-800 opacity-60 tracking-widest mb-1">Asistencia</p>
                   <p className="text-lg font-black text-indigo-900">{student.attendance}%</p>
                 </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                 <div className="bg-gray-50/50 p-6 rounded-2xl border border-gray-100">
-                  <h4 className="font-black text-gray-900 text-xs uppercase tracking-widest mb-4 flex items-center gap-2">
+                  <h4 className="font-black text-gray-900 text-[10px] uppercase tracking-widest mb-4 flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-blue-500"></span> Personales
                   </h4>
                   <ul className="space-y-2">
                     {student.personalFactors.length > 0 ? student.personalFactors.map((f, i) => (
                       <li key={i} className="text-sm font-medium text-gray-600 bg-white p-3 rounded-xl border border-gray-100 shadow-sm">{f}</li>
-                    )) : <li className="text-xs text-gray-400 italic">No hay factores registrados</li>}
+                    )) : <li className="text-xs text-gray-400 italic">Sin observaciones</li>}
                   </ul>
                 </div>
                 <div className="bg-gray-50/50 p-6 rounded-2xl border border-gray-100">
-                  <h4 className="font-black text-gray-900 text-xs uppercase tracking-widest mb-4 flex items-center gap-2">
+                  <h4 className="font-black text-gray-900 text-[10px] uppercase tracking-widest mb-4 flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-emerald-500"></span> Académicos
                   </h4>
                   <ul className="space-y-2">
                     {student.academicFactors.length > 0 ? student.academicFactors.map((f, i) => (
                       <li key={i} className="text-sm font-medium text-gray-600 bg-white p-3 rounded-xl border border-gray-100 shadow-sm">{f}</li>
-                    )) : <li className="text-xs text-gray-400 italic">No hay factores registrados</li>}
+                    )) : <li className="text-xs text-gray-400 italic">Sin observaciones</li>}
                   </ul>
                 </div>
                 <div className="bg-gray-50/50 p-6 rounded-2xl border border-gray-100">
-                  <h4 className="font-black text-gray-900 text-xs uppercase tracking-widest mb-4 flex items-center gap-2">
+                  <h4 className="font-black text-gray-900 text-[10px] uppercase tracking-widest mb-4 flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-purple-500"></span> Institucionales
                   </h4>
                   <ul className="space-y-2">
                     {student.institutionalFactors.length > 0 ? student.institutionalFactors.map((f, i) => (
                       <li key={i} className="text-sm font-medium text-gray-600 bg-white p-3 rounded-xl border border-gray-100 shadow-sm">{f}</li>
-                    )) : <li className="text-xs text-gray-400 italic">No hay factores registrados</li>}
+                    )) : <li className="text-xs text-gray-400 italic">Sin observaciones</li>}
                   </ul>
                 </div>
               </div>
             </div>
           )}
 
-          {activeTab === 'academic' && role === UserRole.ADMIN && (
+          {activeTab === 'academic' && canSeeAcademicHistory && (
             <div className="space-y-6 animate-in fade-in duration-300">
+              <div className="bg-blue-600 p-6 rounded-2xl text-white shadow-lg mb-4">
+                 <h4 className="font-black text-xs uppercase tracking-widest opacity-80 mb-2">Resumen de Trayectoria</h4>
+                 <div className="flex gap-10">
+                    <div>
+                       <span className="text-[10px] font-bold block uppercase opacity-70">Créditos Totales</span>
+                       <span className="text-xl font-black">154 / 320</span>
+                    </div>
+                    <div>
+                       <span className="text-[10px] font-bold block uppercase opacity-70">Regularidad</span>
+                       <span className="text-xl font-black">Alumno Regular</span>
+                    </div>
+                 </div>
+              </div>
+
               <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden shadow-sm">
                 <table className="w-full text-left">
                   <thead className="bg-gray-50/50 text-[10px] font-black uppercase text-gray-400 border-b tracking-widest">
                     <tr>
                       <th className="px-8 py-5">Asignatura</th>
-                      <th className="px-8 py-5">Calificación</th>
-                      <th className="px-8 py-5">Inasistencias</th>
-                      <th className="px-8 py-5">Estatus</th>
+                      <th className="px-8 py-5 text-center">Calificación</th>
+                      <th className="px-8 py-5 text-center">Faltas</th>
+                      <th className="px-8 py-5 text-right">Estatus</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
@@ -223,14 +232,15 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, onClose 
                       { name: 'Química Orgánica II', grade: 8.5, absences: 2, status: 'Aprobado' },
                       { name: 'Bioquímica I', grade: 9.0, absences: 0, status: 'Aprobado' },
                       { name: 'Cálculo Multivariado', grade: 6.5, absences: 5, status: 'En Riesgo' },
+                      { name: 'Biología Celular', grade: 7.8, absences: 1, status: 'Aprobado' },
                     ].map((course, idx) => (
                       <tr key={idx} className="hover:bg-gray-50 transition-colors">
-                        <td className="px-8 py-5 font-bold text-gray-800">{course.name}</td>
-                        <td className="px-8 py-5 font-black text-gray-900">{course.grade}</td>
-                        <td className="px-8 py-5 text-gray-500">{course.absences}</td>
-                        <td className="px-8 py-5">
-                          <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${
-                            course.status === 'En Riesgo' ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'
+                        <td className="px-8 py-5 font-bold text-gray-800 text-sm">{course.name}</td>
+                        <td className="px-8 py-5 font-black text-gray-900 text-center">{course.grade}</td>
+                        <td className="px-8 py-5 text-gray-500 text-center font-bold">{course.absences}</td>
+                        <td className="px-8 py-5 text-right">
+                          <span className={`px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest ${
+                            course.status === 'En Riesgo' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
                           }`}>
                             {course.status}
                           </span>
@@ -251,27 +261,21 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, onClose 
                     <div className="w-16 h-16 border-4 border-blue-100 border-t-blue-600 rounded-full animate-spin"></div>
                     <div className="absolute inset-0 flex items-center justify-center text-xl">✨</div>
                   </div>
-                  <div className="text-center">
-                    <p className="text-gray-900 font-black uppercase tracking-[0.2em] text-xs">Análisis Inteligente en Proceso</p>
-                    <p className="text-gray-400 text-xs font-medium mt-1">Evaluando variables de trayectoria académica...</p>
-                  </div>
+                  <p className="text-gray-400 text-xs font-black uppercase tracking-widest">Nano Banana procesando datos...</p>
                 </div>
               ) : aiAnalysis ? (
                 <div className="space-y-8">
                   <div className={`p-8 rounded-3xl border-2 ${
-                    aiAnalysis.riskLevel === 'HIGH' ? 'border-red-100 bg-red-50/50 text-red-900' : 
-                    aiAnalysis.riskLevel === 'MEDIUM' ? 'border-amber-100 bg-amber-50/50 text-amber-900' : 'border-emerald-100 bg-emerald-50/50 text-emerald-900'
+                    aiAnalysis.riskLevel === 'HIGH' ? 'border-red-100 bg-red-50/50' : 
+                    aiAnalysis.riskLevel === 'MEDIUM' ? 'border-amber-100 bg-amber-50/50' : 'border-emerald-100 bg-emerald-50/50'
                   }`}>
-                    <div className="flex items-center gap-3 mb-4">
-                      <span className="text-2xl">✨</span>
-                      <h3 className="text-lg font-black tracking-tight">Dictamen Predictivo de IA</h3>
-                    </div>
+                    <h3 className="text-lg font-black tracking-tight mb-4 flex items-center gap-2">✨ Diagnóstico Inteligente</h3>
                     <p className="text-lg font-medium leading-relaxed italic opacity-90">"{aiAnalysis.explanation}"</p>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                     <div className="bg-white p-8 rounded-3xl border border-gray-100 shadow-xl">
-                      <h4 className="font-black text-gray-900 text-xs uppercase tracking-widest mb-6 flex items-center gap-2">
+                      <h4 className="font-black text-gray-900 text-[10px] uppercase tracking-widest mb-6 flex items-center gap-2">
                         📋 Hoja de Ruta Recomendada
                       </h4>
                       <ul className="space-y-4">
@@ -283,25 +287,24 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, onClose 
                         ))}
                       </ul>
                     </div>
-                    <div className="bg-gray-900 p-8 rounded-3xl text-white shadow-2xl relative overflow-hidden group">
+                    <div className="bg-[#003B5C] p-8 rounded-3xl text-white shadow-2xl relative overflow-hidden group">
                       <div className="relative z-10">
-                        <h4 className="font-black text-xs uppercase tracking-widest mb-4 opacity-70">Acción Estratégica</h4>
-                        <p className="mb-8 text-gray-300 font-medium leading-relaxed">Tras el análisis, se recomienda formalizar una intervención inmediata para mitigar los factores de riesgo detectados.</p>
+                        <h4 className="font-black text-[10px] uppercase tracking-widest mb-4 opacity-70">Acción Estratégica</h4>
+                        <p className="mb-8 text-blue-100 font-medium leading-relaxed">Se sugiere formalizar una intervención para documentar el progreso de las sugerencias de la IA.</p>
                         <button 
                           onClick={() => setActiveTab('interventions')}
-                          className="w-full bg-blue-600 text-white font-black text-xs uppercase tracking-widest py-4 rounded-2xl hover:bg-blue-500 transition-all shadow-xl active:scale-95"
+                          className="w-full bg-[#FFD100] text-[#003B5C] font-black text-xs uppercase tracking-widest py-4 rounded-2xl hover:bg-white transition-all shadow-xl"
                         >
-                          Iniciar Plan de Apoyo
+                          Registrar Intervención
                         </button>
                       </div>
-                      <div className="absolute -right-10 -bottom-10 w-48 h-48 bg-blue-600/20 rounded-full blur-3xl group-hover:scale-125 transition-transform"></div>
                     </div>
                   </div>
                 </div>
               ) : (
                 <div className="text-center py-20 bg-gray-50 rounded-3xl border border-dashed border-gray-200">
                   <p className="text-gray-400 font-medium">No se pudo generar el análisis predictivo.</p>
-                  <button onClick={fetchAiAnalysis} className="mt-4 bg-white px-6 py-2 rounded-xl text-xs font-black uppercase text-blue-600 border border-blue-100 shadow-sm hover:bg-blue-50">Intentar de Nuevo</button>
+                  <button onClick={fetchAiAnalysis} className="mt-4 bg-white px-6 py-2 rounded-xl text-xs font-black uppercase text-blue-600 border border-blue-100 shadow-sm hover:bg-blue-50">Reintentar</button>
                 </div>
               )}
             </div>
@@ -312,14 +315,14 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, onClose 
               <div className="flex justify-between items-center bg-gray-50 p-8 rounded-[2rem] border border-gray-100 shadow-inner">
                 <div>
                   <h3 className="text-2xl font-black text-gray-900 tracking-tighter">Bitácora de Seguimiento</h3>
-                  <p className="text-xs text-gray-400 font-bold uppercase tracking-widest mt-1">Historial clínico y académico del alumno</p>
+                  <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest mt-1">Acciones preventivas y correctivas</p>
                 </div>
                 {!showAddIntervention && (
                   <button 
                     onClick={() => setShowAddIntervention(true)}
-                    className="bg-[#003B5C] text-white px-8 py-4 rounded-2xl text-[11px] font-black uppercase tracking-widest hover:bg-blue-600 transition-all shadow-xl active:scale-95"
+                    className="bg-[#003B5C] text-white px-8 py-4 rounded-2xl text-[11px] font-black uppercase tracking-widest hover:bg-blue-600 transition-all shadow-xl"
                   >
-                    + Nueva Intervención
+                    + Nuevo Registro
                   </button>
                 )}
               </div>
@@ -327,15 +330,14 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, onClose 
               {showAddIntervention ? (
                 <div className="bg-white p-8 rounded-3xl border-2 border-blue-100 shadow-2xl animate-in slide-in-from-top-4 duration-500">
                   <div className="flex justify-between items-center mb-8">
-                    <h4 className="font-black text-xl text-gray-900 tracking-tight">Registro de Nueva Acción</h4>
-                    <span className="text-[10px] font-black text-blue-600 uppercase tracking-widest bg-blue-50 px-3 py-1 rounded-full border border-blue-100">Formulario Oficial</span>
+                    <h4 className="font-black text-xl text-gray-900 tracking-tight">Registro de Intervención</h4>
                   </div>
                   
                   <div className="grid grid-cols-1 gap-6">
-                    <div className="group">
-                      <label className="block text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-3 ml-1 group-focus-within:text-blue-600 transition-colors">Eje de Intervención</label>
+                    <div>
+                      <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Eje de Intervención</label>
                       <select 
-                        className="w-full bg-gray-50 border border-gray-200 p-4 rounded-2xl text-sm font-bold text-gray-700 outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all"
+                        className="w-full bg-gray-50 border border-gray-200 p-4 rounded-2xl text-sm font-bold text-gray-700 outline-none focus:border-blue-500 transition-all"
                         value={newIntervention.type}
                         onChange={(e) => setNewIntervention({...newIntervention, type: e.target.value})}
                       >
@@ -344,43 +346,23 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, onClose 
                         <option>Seguimiento de Beca</option>
                         <option>Vinculación Padres/Tutores</option>
                         <option>Canalización Médica</option>
-                        <option>Otro</option>
                       </select>
                     </div>
 
-                    <div className="group">
-                      <label className="block text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-3 ml-1 group-focus-within:text-blue-600 transition-colors">Descripción del Suceso/Acuerdos</label>
+                    <div>
+                      <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Descripción y Acuerdos</label>
                       <textarea 
-                        className="w-full bg-gray-50 border border-gray-200 p-4 rounded-2xl text-sm font-medium text-gray-700 outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all h-32 resize-none"
-                        placeholder="Escriba los puntos clave discutidos y las acciones acordadas..."
+                        className="w-full bg-gray-50 border border-gray-200 p-4 rounded-2xl text-sm font-medium text-gray-700 outline-none focus:border-blue-500 h-32 resize-none"
+                        placeholder="Describa los puntos clave discutidos..."
                         value={newIntervention.description}
                         onChange={(e) => setNewIntervention({...newIntervention, description: e.target.value})}
                       />
                     </div>
 
-                    <div className="group">
-                      <label className="block text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-3 ml-1 group-focus-within:text-blue-600 transition-colors">Observaciones Confidenciales / Notas Técnicas</label>
-                      <textarea 
-                        className="w-full bg-gray-50 border border-gray-200 p-4 rounded-2xl text-sm font-medium text-gray-700 outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all h-24 resize-none"
-                        placeholder="Información adicional relevante para el seguimiento..."
-                        value={newIntervention.additionalNotes}
-                        onChange={(e) => setNewIntervention({...newIntervention, additionalNotes: e.target.value})}
-                      />
-                    </div>
-
                     <div className="flex justify-end gap-4 pt-4">
-                      <button 
-                        onClick={() => setShowAddIntervention(false)}
-                        className="px-6 py-3 text-[10px] font-black text-gray-400 uppercase tracking-widest hover:text-gray-600 transition-colors"
-                      >
-                        Cancelar
-                      </button>
-                      <button 
-                        onClick={handleSaveIntervention}
-                        disabled={isSaving}
-                        className="bg-gray-900 text-white px-10 py-4 rounded-2xl text-[11px] font-black uppercase tracking-widest hover:bg-emerald-600 transition-all shadow-xl active:scale-95 disabled:opacity-50"
-                      >
-                        {isSaving ? 'Guardando Registro...' : 'Guardar en Bitácora'}
+                      <button onClick={() => setShowAddIntervention(false)} className="px-6 py-3 text-[10px] font-black text-gray-400 uppercase tracking-widest hover:text-gray-600">Cancelar</button>
+                      <button onClick={handleSaveIntervention} disabled={isSaving} className="bg-[#003B5C] text-white px-10 py-4 rounded-2xl text-[11px] font-black uppercase tracking-widest hover:bg-emerald-600 transition-all disabled:opacity-50">
+                        {isSaving ? 'Guardando...' : 'Guardar Bitácora'}
                       </button>
                     </div>
                   </div>
@@ -388,70 +370,34 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, onClose 
               ) : (
                 <div className="grid grid-cols-1 gap-6 relative before:absolute before:left-8 before:top-4 before:bottom-4 before:w-0.5 before:bg-gray-100">
                   {loadingInterventions ? (
-                    <div className="text-center py-10 animate-pulse text-[10px] font-black uppercase tracking-widest text-gray-400">Accediendo al servidor...</div>
+                    <p className="text-center py-10 animate-pulse text-[10px] font-black uppercase text-gray-400">Consultando historial...</p>
                   ) : interventions.length === 0 ? (
                     <div className="text-center py-20 bg-gray-50 rounded-[3rem] border border-dashed border-gray-200">
-                      <span className="text-4xl block mb-4">📂</span>
-                      <p className="text-gray-400 font-black uppercase text-[10px] tracking-widest">Sin registros en este ciclo escolar.</p>
+                      <p className="text-gray-400 font-black uppercase text-[10px] tracking-widest">Sin registros de intervención.</p>
                     </div>
-                  ) : interventions.map((item, idx) => {
-                    const typeColorClass = getTypeColor(item.tipo_intervencion);
-                    return (
-                      <div key={idx} className="bg-white border border-gray-100 rounded-[2rem] p-8 shadow-sm hover:shadow-xl hover:border-blue-100 transition-all group relative ml-16">
-                        {/* Indicador de Línea de Tiempo */}
-                        <div className="absolute -left-[3.25rem] top-10 w-4 h-4 rounded-full border-4 border-white bg-blue-600 shadow-md"></div>
-                        
-                        <div className="flex flex-col sm:flex-row justify-between items-start gap-4 mb-6">
-                          <div className="flex items-center gap-3">
-                            <span className="text-xl">{getInterventionIcon(item.tipo_intervencion)}</span>
-                            <span className={`text-[10px] font-black uppercase px-4 py-1.5 rounded-full tracking-widest border ${typeColorClass.split(' ')[0]} ${typeColorClass.split(' ')[2]}`}>
-                              {item.tipo_intervencion}
-                            </span>
-                          </div>
-                          
-                          <div className="flex items-center gap-3">
-                            <span className="flex items-center gap-1.5 bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border border-emerald-100">
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                              Resuelto
-                            </span>
-                            <span className="text-[10px] text-gray-400 font-black uppercase tracking-widest bg-gray-50 px-3 py-1 rounded-full border border-gray-100">
-                              📅 {new Date(item.fecha).toLocaleDateString()}
-                            </span>
-                          </div>
-                        </div>
+                  ) : interventions.map((item, idx) => (
+                    <div key={idx} className="bg-white border border-gray-100 rounded-[2rem] p-8 shadow-sm hover:shadow-xl transition-all relative ml-16">
+                      <div className="absolute -left-[3.25rem] top-10 w-4 h-4 rounded-full border-4 border-white bg-blue-600 shadow-md"></div>
+                      
+                      <div className="flex justify-between items-start mb-6">
+                        <span className={`text-[10px] font-black uppercase px-4 py-1.5 rounded-full tracking-widest border ${getTypeColor(item.tipo_intervencion)}`}>
+                          {item.tipo_intervencion}
+                        </span>
+                        <span className="text-[10px] text-gray-400 font-black uppercase tracking-widest bg-gray-50 px-3 py-1 rounded-full">
+                          📅 {new Date(item.fecha).toLocaleDateString()}
+                        </span>
+                      </div>
 
-                        <div className="mb-6">
-                           <p className="text-gray-800 font-bold text-sm leading-relaxed">
-                              {item.descripcion}
-                           </p>
-                        </div>
-                        
-                        {item.notas_adicionales && (
-                          <div className="bg-[#FFFCEB] p-6 rounded-2xl border-l-4 border-amber-300 mb-6 shadow-inner">
-                            <p className="text-[8px] font-black text-amber-800 uppercase tracking-[0.3em] mb-2 flex items-center gap-1">
-                               📌 Nota Técnica
-                            </p>
-                            <p className="text-amber-900 text-xs italic font-medium leading-relaxed">
-                               "{item.notas_adicionales}"
-                            </p>
-                          </div>
-                        )}
-                        
-                        <div className="flex items-center justify-between pt-6 border-t border-gray-50">
-                          <div className="flex items-center gap-3">
-                            <div className="w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center text-[9px] text-white font-black shadow-inner">
-                               UAS
-                            </div>
-                            <div>
-                               <p className="text-[8px] text-gray-400 font-black uppercase tracking-widest leading-none">Responsable del Caso</p>
-                               <p className="text-[10px] text-gray-900 font-black mt-1">{item.docentes?.nombre || 'Docente Tutor'}</p>
-                            </div>
-                          </div>
-                          <button className="text-[9px] font-black text-blue-600 uppercase tracking-widest hover:underline">Ver detalles completos</button>
+                      <p className="text-gray-800 font-bold text-sm leading-relaxed mb-6">{item.descripcion}</p>
+                      
+                      <div className="flex items-center justify-between pt-6 border-t border-gray-50">
+                        <div className="flex items-center gap-3">
+                          <div className="w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center text-[9px] text-white font-black">UAS</div>
+                          <p className="text-[10px] text-gray-900 font-black">{item.docentes?.nombre || 'Docente Tutor'}</p>
                         </div>
                       </div>
-                    );
-                  })}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

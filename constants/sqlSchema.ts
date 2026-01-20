@@ -1,11 +1,34 @@
 
-export const SQL_SCHEMA = `-- STA-FCQB: ESQUEMA INTEGRAL V5.4 - NORMALIZACIÓN DE RELACIONES
+export const SQL_SCHEMA = `-- STA-FCQB: REINICIO MAESTRO DE BASE DE DATOS V7.3
 
--- 1. Extensiones
+-- 1. Limpieza de Tablas Existentes
+DROP TABLE IF EXISTS asistencias CASCADE;
+DROP TABLE IF EXISTS calificaciones CASCADE;
+DROP TABLE IF EXISTS intervenciones CASCADE;
+DROP TABLE IF EXISTS actividades CASCADE;
+DROP TABLE IF EXISTS tutorias CASCADE;
+DROP TABLE IF EXISTS estudiantes CASCADE;
+DROP TABLE IF EXISTS grupos CASCADE;
+DROP TABLE IF EXISTS materias CASCADE;
+DROP TABLE IF EXISTS ciclos_escolares CASCADE;
+DROP TABLE IF EXISTS docentes CASCADE;
+
+-- 2. Extensiones
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- 2. Tabla de Ciclos Escolares
-CREATE TABLE IF NOT EXISTS ciclos_escolares (
+-- 3. Tabla de Docentes
+CREATE TABLE docentes (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    numero_empleado TEXT UNIQUE NOT NULL,
+    nombre TEXT NOT NULL,
+    email TEXT UNIQUE NOT NULL,
+    password TEXT NOT NULL,
+    rol TEXT[] NOT NULL DEFAULT '{DOCENTE}',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 4. Tablas de Apoyo
+CREATE TABLE ciclos_escolares (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     nombre TEXT NOT NULL,
     fecha_inicio DATE NOT NULL,
@@ -14,33 +37,19 @@ CREATE TABLE IF NOT EXISTS ciclos_escolares (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- 3. Tabla de Materias (Base de la Malla Curricular)
-CREATE TABLE IF NOT EXISTS materias (
+CREATE TABLE materias (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     codigo TEXT UNIQUE,
     nombre TEXT NOT NULL,
-    carrera TEXT NOT NULL, -- Ej: Ingeniería Química
+    carrera TEXT NOT NULL,
     semestre INTEGER NOT NULL,
     creditos INTEGER DEFAULT 5,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- 4. Tabla de Docentes
-CREATE TABLE IF NOT EXISTS docentes (
+CREATE TABLE grupos (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    numero_empleado TEXT UNIQUE NOT NULL,
-    nombre TEXT NOT NULL,
-    email TEXT UNIQUE NOT NULL,
-    password TEXT NOT NULL,
-    rol TEXT DEFAULT 'DOCENTE',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- 5. Tabla de Grupos (Vínculo Docente-Materia-Ciclo)
--- El programa educativo se obtiene vía materia_id -> materias.carrera
-CREATE TABLE IF NOT EXISTS grupos (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    nombre_grupo TEXT NOT NULL, -- Ej: 101, 302
+    nombre_grupo TEXT NOT NULL,
     turno TEXT NOT NULL,
     materia_id UUID REFERENCES materias(id) ON DELETE CASCADE,
     docente_id UUID REFERENCES docentes(id) ON DELETE CASCADE,
@@ -48,9 +57,18 @@ CREATE TABLE IF NOT EXISTS grupos (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- 6. Tabla de Estudiantes
-CREATE TABLE IF NOT EXISTS estudiantes (
-    id TEXT PRIMARY KEY, -- Matrícula
+-- 5. Tabla de Tutorías
+CREATE TABLE tutorias (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    nombre_grupo TEXT NOT NULL,
+    tutor_id UUID REFERENCES docentes(id) ON DELETE CASCADE,
+    ciclo_id UUID REFERENCES ciclos_escolares(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    CONSTRAINT unique_tutoria_grupo_ciclo UNIQUE(nombre_grupo, ciclo_id)
+);
+
+CREATE TABLE estudiantes (
+    id TEXT PRIMARY KEY,
     nombre TEXT NOT NULL,
     carrera TEXT NOT NULL,
     semestre INTEGER NOT NULL,
@@ -66,51 +84,61 @@ CREATE TABLE IF NOT EXISTS estudiantes (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- 7. Tabla de Asistencias
-CREATE TABLE IF NOT EXISTS asistencias (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    estudiante_id TEXT REFERENCES estudiantes(id) ON DELETE CASCADE,
-    grupo_id UUID REFERENCES grupos(id) ON DELETE CASCADE,
-    fecha DATE DEFAULT CURRENT_DATE,
-    presente BOOLEAN DEFAULT true,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    UNIQUE(estudiante_id, grupo_id, fecha)
-);
-
--- 8. Tabla de Actividades y Calificaciones
-CREATE TABLE IF NOT EXISTS actividades (
+CREATE TABLE actividades (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     grupo_id UUID REFERENCES grupos(id) ON DELETE CASCADE,
     docente_id UUID REFERENCES docentes(id) ON DELETE CASCADE,
     titulo TEXT NOT NULL,
     descripcion TEXT,
     tipo TEXT NOT NULL,
-    unidad INTEGER DEFAULT 1,
-    fecha_entrega TIMESTAMP WITH TIME ZONE,
+    unidad INTEGER NOT NULL,
+    fecha_entrega TIMESTAMP WITH TIME ZONE NOT NULL,
     puntos_max INTEGER DEFAULT 10,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS calificaciones (
+CREATE TABLE calificaciones (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     actividad_id UUID REFERENCES actividades(id) ON DELETE CASCADE,
     estudiante_id TEXT REFERENCES estudiantes(id) ON DELETE CASCADE,
-    calificacion DECIMAL(5,2) DEFAULT 0,
-    comentarios TEXT,
-    entregado BOOLEAN DEFAULT false,
+    calificacion DECIMAL(4,2) NOT NULL,
+    entregado BOOLEAN DEFAULT true,
     fecha_evaluacion TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     UNIQUE(actividad_id, estudiante_id)
 );
 
--- Permisos Globales (Desarrollo)
-ALTER TABLE ciclos_escolares DISABLE ROW LEVEL SECURITY;
-ALTER TABLE materias DISABLE ROW LEVEL SECURITY;
+CREATE TABLE asistencias (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    estudiante_id TEXT REFERENCES estudiantes(id) ON DELETE CASCADE,
+    grupo_id UUID REFERENCES grupos(id) ON DELETE CASCADE,
+    fecha DATE NOT NULL,
+    presente BOOLEAN NOT NULL,
+    UNIQUE(estudiante_id, grupo_id, fecha)
+);
+
+CREATE TABLE intervenciones (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    estudiante_id TEXT REFERENCES estudiantes(id) ON DELETE CASCADE,
+    tipo_intervencion TEXT NOT NULL,
+    descripcion TEXT NOT NULL,
+    notas_adicionales TEXT,
+    ciclo_id UUID REFERENCES ciclos_escolares(id),
+    fecha TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    estatus TEXT DEFAULT 'COMPLETED'
+);
+
+-- 6. Seguridad (Desactivar RLS para desarrollo ágil)
 ALTER TABLE docentes DISABLE ROW LEVEL SECURITY;
-ALTER TABLE grupos DISABLE ROW LEVEL SECURITY;
 ALTER TABLE estudiantes DISABLE ROW LEVEL SECURITY;
-ALTER TABLE asistencias DISABLE ROW LEVEL SECURITY;
+ALTER TABLE grupos DISABLE ROW LEVEL SECURITY;
+ALTER TABLE materias DISABLE ROW LEVEL SECURITY;
+ALTER TABLE ciclos_escolares DISABLE ROW LEVEL SECURITY;
 ALTER TABLE actividades DISABLE ROW LEVEL SECURITY;
 ALTER TABLE calificaciones DISABLE ROW LEVEL SECURITY;
+ALTER TABLE asistencias DISABLE ROW LEVEL SECURITY;
+ALTER TABLE intervenciones DISABLE ROW LEVEL SECURITY;
+ALTER TABLE tutorias DISABLE ROW LEVEL SECURITY;
 
+-- 7. Recargar Esquema
 NOTIFY pgrst, 'reload schema';
 `;

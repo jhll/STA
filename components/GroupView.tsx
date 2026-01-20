@@ -9,7 +9,7 @@ interface TeacherGroup {
   id: string;
   nombre_grupo: string;
   turno: string;
-  materias: { nombre: string; carrera: string; semestre: number };
+  materias: any; // Se normaliza con getRelation
 }
 
 const GroupView: React.FC<{ userId: string; role: UserRole }> = ({ userId, role }) => {
@@ -25,6 +25,9 @@ const GroupView: React.FC<{ userId: string; role: UserRole }> = ({ userId, role 
   const [isUpdate, setIsUpdate] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
 
+  // Helper crítico para evitar el error [object Object] en React al acceder a relaciones de Supabase
+  const getRelation = (data: any) => Array.isArray(data) ? data[0] : data;
+
   const fetchTeacherGroups = async () => {
     if (!userId) return;
     setLoading(true);
@@ -34,7 +37,7 @@ const GroupView: React.FC<{ userId: string; role: UserRole }> = ({ userId, role 
         .select('id, nombre_grupo, turno, materias (nombre, carrera, semestre)')
         .eq('docente_id', userId);
       if (error) throw error;
-      setAssignedGroups(data as any[] || []);
+      setAssignedGroups(data || []);
       if (data && data.length > 0) setSelectedGroupId(data[0].id);
     } catch (err) { console.error(err); } finally { setLoading(false); }
   };
@@ -76,38 +79,22 @@ const GroupView: React.FC<{ userId: string; role: UserRole }> = ({ userId, role 
       const { error } = await supabase.from('asistencias').upsert(records, { onConflict: 'estudiante_id,grupo_id,fecha' });
       if (error) throw error;
 
-      // Sincronizar métricas y riesgo
       for (const student of students) {
-        // 1. Obtener todas las asistencias del alumno para este grupo
         const { data: attendanceData } = await supabase.from('asistencias').select('presente').eq('estudiante_id', student.id).eq('grupo_id', selectedGroupId);
-        
-        // 2. Obtener el promedio actual del alumno
         const { data: studentData } = await supabase.from('estudiantes').select('promedio_acumulado').eq('id', student.id).single();
 
         if (attendanceData && studentData) {
           const perc = Math.round((attendanceData.filter(d => d.presente).length / attendanceData.length) * 100);
           const avg = Number(studentData.promedio_acumulado);
-          
-          // 3. Calcular nuevo nivel de riesgo usando la función centralizada
           const newRisk = calculateRisk(avg, perc);
-
-          // 4. Actualizar registro del estudiante
-          await supabase.from('estudiantes').update({ 
-            porcentaje_asistencia: perc,
-            nivel_riesgo: newRisk
-          }).eq('id', student.id);
+          await supabase.from('estudiantes').update({ porcentaje_asistencia: perc, nivel_riesgo: newRisk }).eq('id', student.id);
         }
       }
 
       setIsUpdate(true);
       setHasChanges(false);
       alert("✅ Asistencia y niveles de riesgo actualizados.");
-    } catch (err) { 
-      console.error(err);
-      alert("❌ Error al sincronizar métricas."); 
-    } finally { 
-      setIsSaving(false); 
-    }
+    } catch (err) { alert("❌ Error al sincronizar métricas."); } finally { setIsSaving(false); }
   };
 
   useEffect(() => { fetchTeacherGroups(); }, [userId]);
@@ -120,7 +107,7 @@ const GroupView: React.FC<{ userId: string; role: UserRole }> = ({ userId, role 
     setHasChanges(true);
   };
 
-  if (loading) return <div className="p-20 text-center animate-pulse font-black text-gray-300">CONFIGURANDO...</div>;
+  if (loading) return <div className="p-20 text-center animate-pulse font-black text-gray-300 uppercase">Configurando Entorno...</div>;
 
   return (
     <div className="max-w-7xl mx-auto p-4 md:p-8 space-y-6 animate-in fade-in duration-500">
@@ -128,28 +115,28 @@ const GroupView: React.FC<{ userId: string; role: UserRole }> = ({ userId, role 
         <div className="w-full xl:w-1/2">
            <div className="flex items-center gap-3 mb-2">
              <span className="bg-blue-600 text-white text-[9px] font-black uppercase px-2 py-1 rounded-md tracking-widest">Docente Tutor</span>
-             <h2 className="text-3xl font-black text-gray-900 tracking-tighter leading-none mb-2">Control de Asistencia</h2>
+             <h2 className="text-3xl font-black text-gray-900 tracking-tighter mb-2">Pase de Lista</h2>
            </div>
-           <p className="text-gray-400 font-medium">Gestiona la puntualidad diaria y actualiza el riesgo académico.</p>
-           
            <div className="mt-10 flex flex-wrap gap-4">
               <div className="flex-1 min-w-[200px]">
-                <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Fecha de Clase</label>
+                <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Fecha</label>
                 <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} className="w-full bg-gray-50 border border-gray-200 p-4 rounded-2xl font-bold text-sm outline-none focus:ring-4 focus:ring-blue-500/10 transition-all" />
               </div>
               <div className="flex-1 min-w-[200px]">
-                <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Seleccionar Grupo</label>
-                <select value={selectedGroupId} onChange={(e) => setSelectedGroupId(e.target.value)} className="w-full bg-gray-50 border border-gray-200 p-4 rounded-2xl font-bold text-sm outline-none focus:ring-4 focus:ring-blue-500/10 transition-all">
-                  {assignedGroups.map(g => <option key={g.id} value={g.id}>{g.nombre_grupo} - {g.materias?.nombre}</option>)}
+                <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Grupo / Materia</label>
+                <select value={selectedGroupId} onChange={(e) => setSelectedGroupId(e.target.value)} className="w-full bg-gray-50 border border-gray-200 p-4 rounded-2xl font-bold text-sm outline-none">
+                  {assignedGroups.map(g => {
+                    const matInfo = getRelation(g.materias);
+                    return <option key={g.id} value={g.id}>{String(g.nombre_grupo)} - {String(matInfo?.nombre || 'Sin Materia')}</option>;
+                  })}
                 </select>
               </div>
            </div>
         </div>
-
         <div className="w-full xl:w-auto flex flex-col items-end gap-4">
-           {hasChanges && <span className="text-orange-500 text-[10px] font-black uppercase tracking-widest animate-pulse">● Cambios sin guardar</span>}
+           {hasChanges && <span className="text-orange-500 text-[10px] font-black uppercase tracking-widest animate-pulse">● Cambios pendientes</span>}
            <button onClick={handleSaveAttendance} disabled={isSaving || !hasChanges} className={`w-full xl:w-auto px-16 py-5 rounded-[2rem] font-black text-xs uppercase tracking-[0.2em] shadow-2xl transition-all active:scale-95 disabled:opacity-50 ${isUpdate ? 'bg-blue-600 text-white' : 'bg-gray-900 text-white hover:bg-emerald-600'}`}>
-             {isSaving ? 'Sincronizando Riesgo...' : isUpdate ? 'Actualizar Pase' : 'Guardar Lista'}
+             {isSaving ? 'Actualizando...' : isUpdate ? 'Actualizar Pase' : 'Guardar Lista'}
            </button>
         </div>
       </div>
@@ -157,24 +144,23 @@ const GroupView: React.FC<{ userId: string; role: UserRole }> = ({ userId, role 
       <div className="bg-white border border-gray-100 rounded-[3rem] overflow-hidden shadow-sm">
         <div className="p-8 border-b bg-gray-50/50 flex justify-between items-center">
            <div className="flex gap-4">
-             <button onClick={() => toggleAll(true)} className="text-[10px] font-black uppercase text-emerald-600 tracking-widest hover:underline">Todos Presentes</button>
-             <button onClick={() => toggleAll(false)} className="text-[10px] font-black uppercase text-red-600 tracking-widest hover:underline">Todos Ausentes</button>
+             <button onClick={() => toggleAll(true)} className="text-[10px] font-black uppercase text-emerald-600 tracking-widest hover:underline">Asistencia Total</button>
+             <button onClick={() => toggleAll(false)} className="text-[10px] font-black uppercase text-red-600 tracking-widest hover:underline">Falta Total</button>
            </div>
-           <span className="text-[10px] font-black text-gray-300 uppercase tracking-widest">{students.length} Alumnos</span>
         </div>
         <table className="w-full text-left">
           <tbody className="divide-y divide-gray-50">
             {loadingStudents ? (
-              <tr><td colSpan={3} className="py-20 text-center text-gray-300 font-black">CARGANDO NÓMINA...</td></tr>
+              <tr><td colSpan={3} className="py-20 text-center text-gray-300 font-black uppercase">Obteniendo alumnos...</td></tr>
             ) : students.map((student) => (
               <tr key={student.id} className="hover:bg-blue-50/10 group transition-all">
                 <td className="px-10 py-6">
                   <div className="flex items-center gap-5">
-                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-white text-xs shadow-md transition-all group-hover:rotate-3 ${student.risk === 'HIGH' ? 'bg-red-500' : 'bg-gray-200 text-gray-500'}`}>
+                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-white text-xs shadow-md ${student.risk === 'HIGH' ? 'bg-red-500' : 'bg-gray-200 text-gray-500'}`}>
                       {student.name.charAt(0)}
                     </div>
                     <div>
-                      <p className="font-bold text-gray-900 text-sm leading-none mb-1">{student.name}</p>
+                      <p className="font-bold text-gray-900 text-sm mb-1">{student.name}</p>
                       <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest">{student.id}</p>
                     </div>
                   </div>
@@ -183,16 +169,16 @@ const GroupView: React.FC<{ userId: string; role: UserRole }> = ({ userId, role 
                   <div className="flex justify-center">
                     <button 
                       onClick={() => { setAttendance(prev => ({ ...prev, [student.id]: !prev[student.id] })); setHasChanges(true); }}
-                      className={`w-20 h-10 rounded-2xl transition-all relative border-2 ${attendance[student.id] ? 'bg-emerald-50 border-emerald-100' : 'bg-red-50 border-red-100'}`}
+                      className={`w-24 h-11 rounded-2xl transition-all border-2 ${attendance[student.id] ? 'bg-emerald-50 border-emerald-100 text-emerald-600' : 'bg-red-50 border-red-100 text-red-500'}`}
                     >
-                      <span className={`text-[9px] font-black uppercase tracking-widest ${attendance[student.id] ? 'text-emerald-600' : 'text-red-500'}`}>
+                      <span className="text-[10px] font-black uppercase tracking-widest">
                         {attendance[student.id] ? 'PRESENTE' : 'FALTA'}
                       </span>
                     </button>
                   </div>
                 </td>
                 <td className="px-10 py-6 text-right">
-                  <button onClick={() => setSelectedStudent(student)} className="w-10 h-10 rounded-xl bg-gray-50 flex items-center justify-center hover:bg-gray-900 hover:text-white transition-all shadow-inner">👁️</button>
+                  <button onClick={() => setSelectedStudent(student)} className="w-10 h-10 rounded-xl bg-gray-50 flex items-center justify-center hover:bg-gray-900 hover:text-white transition-all">👁️</button>
                 </td>
               </tr>
             ))}

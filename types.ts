@@ -1,7 +1,8 @@
 
 export enum UserRole {
   ADMIN = 'ADMIN',
-  DOCENTE = 'DOCENTE'
+  DOCENTE = 'DOCENTE',
+  TUTOR = 'TUTOR'
 }
 
 export enum RiskLevel {
@@ -37,6 +38,16 @@ export interface CicloEscolar {
   created_at?: string;
 }
 
+export interface Subject {
+  id: string;
+  codigo: string;
+  nombre: string;
+  carrera: Career;
+  semestre: number;
+  creditos: number;
+  created_at?: string;
+}
+
 export interface Student {
   id: string;
   name: string;
@@ -52,7 +63,6 @@ export interface Student {
   academicFactors: string[];
   institutionalFactors: string[];
   ciclo_id?: string;
-  // Promedios por categoría
   avgExams?: number;
   avgTasks?: number;
   avgExercises?: number;
