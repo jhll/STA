@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { RiskLevel } from './types';
+import { RiskLevel, Career } from './types';
 
 // Colores Oficiales UAS/FCQB
 export const UAS_COLORS = {
@@ -11,10 +11,10 @@ export const UAS_COLORS = {
 };
 
 export const CAREERS = [
-  'Ingeniería Química',
-  'Ingeniería Bioquímica',
-  'Químico Farmacéutico Biólogo',
-  'Biotecnología Genómica'
+  Career.IQ,
+  Career.IBQ,
+  Career.QFB,
+  Career.BG
 ];
 
 export const RISK_COLORS = {

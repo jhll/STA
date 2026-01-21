@@ -33,7 +33,6 @@ const StudentListView: React.FC<{ role: UserRole; userId: string }> = ({ role, u
       
       const { data: semData } = await semQuery;
       
-      // Fix: Add type assertion to number for uniqueSemesters calculation to prevent 'unknown' arithmetic errors
       const uniqueSemesters = Array.from(new Set((semData?.map(s => s.semestre) || []) as number[])).sort((a, b) => a - b);
       setAvailableSemesters(uniqueSemesters.length > 0 ? uniqueSemesters : [1,2,3,4,5,6,7,8,9,10]);
 
@@ -52,7 +51,6 @@ const StudentListView: React.FC<{ role: UserRole; userId: string }> = ({ role, u
         
         const { data: groupData } = await groupQuery;
         
-        // Fix: Add type assertion to string for uniqueGroups calculation to prevent 'unknown' assignment errors
         const uniqueGroups = Array.from(new Set((groupData?.map(g => g.grupo) || []) as string[])).sort();
         setAvailableGroups(uniqueGroups);
       }
@@ -71,7 +69,7 @@ const StudentListView: React.FC<{ role: UserRole; userId: string }> = ({ role, u
       // Seguridad por rol
       if (role === UserRole.TUTOR) {
         if (tutorGroup) query = query.eq('grupo', tutorGroup);
-        else return; // Esperar a que el tutorGroup cargue
+        else return; 
       } else if (role === UserRole.DOCENTE) {
         const { data: groups } = await supabase.from('grupos').select('nombre_grupo').eq('docente_id', userId);
         const names = Array.from(new Set((groups || []).map(g => g.nombre_grupo)));
@@ -95,7 +93,6 @@ const StudentListView: React.FC<{ role: UserRole; userId: string }> = ({ role, u
       
       if (!data) { setStudents([]); return; }
 
-      // Mapeo dinámico de riesgo y promedios
       const studentIds = data.map(s => s.id);
       const { data: gradesData } = await supabase
         .from('calificaciones')
@@ -109,10 +106,9 @@ const StudentListView: React.FC<{ role: UserRole; userId: string }> = ({ role, u
           return filtered.length === 0 ? 0 : filtered.reduce((acc, curr) => acc + Number(curr.calificacion), 0) / filtered.length;
         };
 
-        const currentAvg = Number(s.promedio_acumulado);
         return {
           id: s.id, name: s.nombre, career: s.carrera as any, semester: s.semestre, group: s.grupo, shift: s.turno as any,
-          average: currentAvg, attendance: s.porcentaje_asistencia, risk: s.nivel_riesgo as RiskLevel,
+          average: Number(s.promedio_acumulado), attendance: s.porcentaje_asistencia, risk: s.nivel_riesgo as RiskLevel,
           personalFactors: s.factores_personales || [], academicFactors: s.factores_academicos || [], institutionalFactors: s.factores_institucionales || [],
           avgExams: calcAvg(ActivityType.EXAMEN), avgTasks: calcAvg(ActivityType.TAREA), avgExercises: calcAvg(ActivityType.EJERCICIO),
           ciclo_id: s.ciclo_id
@@ -130,12 +126,10 @@ const StudentListView: React.FC<{ role: UserRole; userId: string }> = ({ role, u
     setFilters({ career: 'ALL', semester: 'ALL', group: 'ALL', search: '' });
   };
 
-  // Sincronizar filtros cuando cambia la carrera o el semestre
   useEffect(() => { 
     syncFilters(); 
   }, [userId, role, filters.career, filters.semester]);
 
-  // Cargar estudiantes cuando cambia cualquier filtro
   useEffect(() => { 
     fetchFilteredStudents(); 
   }, [filters, tutorGroup]);
@@ -215,27 +209,29 @@ const StudentListView: React.FC<{ role: UserRole; userId: string }> = ({ role, u
         </div>
 
         <div className="w-full overflow-x-auto">
-          <table className="w-full text-left min-w-[1100px]">
+          <table className="w-full text-left min-w-[1200px]">
             <thead className="bg-[#003B5C]/5 text-[11px] font-black uppercase text-[#003B5C] border-b tracking-widest">
               <tr>
                 <th className="px-10 py-6">Estudiante / Matrícula</th>
                 <th className="px-10 py-6">Programa Académico</th>
-                <th className="px-8 py-6 text-center">Asistencia</th>
-                <th className="px-8 py-6 text-center">Promedio</th>
-                <th className="px-10 py-6 text-center">Semáforo</th>
+                <th className="px-6 py-6 text-center">Asistencia</th>
+                <th className="px-6 py-6 text-center">Exámenes</th>
+                <th className="px-6 py-6 text-center">Tareas</th>
+                <th className="px-6 py-6 text-center">Ejercicios</th>
+                <th className="px-8 py-6 text-center">Semáforo</th>
                 <th className="px-10 py-6 text-right">Acción</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
               {loading ? (
-                <tr><td colSpan={6} className="py-24 text-center">
+                <tr><td colSpan={8} className="py-24 text-center">
                   <div className="flex flex-col items-center gap-4">
                     <div className="w-8 h-8 border-4 border-blue-100 border-t-blue-600 rounded-full animate-spin"></div>
                     <span className="text-gray-300 font-black uppercase text-[10px] tracking-widest">Consultando registros...</span>
                   </div>
                 </td></tr>
               ) : students.length === 0 ? (
-                <tr><td colSpan={6} className="py-32 text-center">
+                <tr><td colSpan={8} className="py-32 text-center">
                   <span className="text-gray-300 font-black uppercase text-lg tracking-widest opacity-50">No se encontraron estudiantes con estos criterios</span>
                 </td></tr>
               ) : students.map((student) => (
@@ -252,26 +248,34 @@ const StudentListView: React.FC<{ role: UserRole; userId: string }> = ({ role, u
                       <span className="text-[10px] text-gray-400 font-bold">{student.semester}° Semestre • Grupo {student.group}</span>
                     </div>
                   </td>
-                  <td className="px-8 py-6 text-center">
+                  <td className="px-6 py-6 text-center">
                     <div className="flex flex-col items-center">
                       <span className={`text-[12px] font-black ${student.attendance < 80 ? 'text-red-600' : 'text-gray-700'}`}>
                         {student.attendance}%
                       </span>
-                      <div className="w-16 h-1 bg-gray-100 rounded-full mt-1 overflow-hidden">
+                      <div className="w-12 h-1 bg-gray-100 rounded-full mt-1 overflow-hidden">
                         <div className={`h-full ${student.attendance < 80 ? 'bg-red-500' : 'bg-emerald-500'}`} style={{ width: `${student.attendance}%` }}></div>
                       </div>
                     </div>
                   </td>
-                  <td className="px-8 py-6 text-center font-black text-gray-900">{student.average.toFixed(1)}</td>
-                  <td className="px-10 py-6 text-center">
-                    <span className={`px-5 py-2 rounded-xl text-[10px] font-black uppercase border shadow-sm transition-all ${RISK_COLORS[student.risk]}`}>
+                  <td className="px-6 py-6 text-center font-bold text-gray-900 text-sm">
+                    <span className={student.avgExams < 7 ? 'text-red-600' : 'text-gray-900'}>{student.avgExams?.toFixed(1) || '0.0'}</span>
+                  </td>
+                  <td className="px-6 py-6 text-center font-bold text-gray-900 text-sm">
+                    <span className={student.avgTasks < 7 ? 'text-red-600' : 'text-gray-900'}>{student.avgTasks?.toFixed(1) || '0.0'}</span>
+                  </td>
+                  <td className="px-6 py-6 text-center font-bold text-gray-900 text-sm">
+                    <span className={student.avgExercises < 7 ? 'text-red-600' : 'text-gray-900'}>{student.avgExercises?.toFixed(1) || '0.0'}</span>
+                  </td>
+                  <td className="px-8 py-6 text-center">
+                    <span className={`px-4 py-1.5 rounded-lg text-[9px] font-black uppercase border shadow-sm transition-all ${RISK_COLORS[student.risk]}`}>
                       {RISK_LABELS[student.risk]}
                     </span>
                   </td>
                   <td className="px-10 py-6 text-right">
                     <button 
                       onClick={() => setSelectedStudent(student)} 
-                      className="bg-gray-100 text-gray-500 px-6 py-2.5 rounded-xl font-black text-[9px] uppercase tracking-widest hover:bg-[#003B5C] hover:text-white transition-all shadow-sm"
+                      className="bg-gray-100 text-gray-500 px-5 py-2 rounded-xl font-black text-[9px] uppercase tracking-widest hover:bg-[#003B5C] hover:text-white transition-all shadow-sm"
                     >
                       Ver Ficha
                     </button>

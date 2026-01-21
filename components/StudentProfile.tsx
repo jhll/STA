@@ -337,7 +337,7 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, onClose 
                         <td className="px-8 py-5 text-gray-500 text-center font-bold">{course.asistencia}%</td>
                         <td className="px-8 py-5 text-right">
                           <span className={`px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest ${
-                            course.eststatus === 'En Riesgo' || course.promedio < 7.0 || course.asistencia < 80 
+                            course.estatus === 'En Riesgo' || course.promedio < 7.0 || course.asistencia < 80 
                               ? 'bg-red-100 text-red-700' 
                               : 'bg-green-100 text-green-700'
                           }`}>
