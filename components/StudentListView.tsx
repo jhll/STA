@@ -59,7 +59,18 @@ const StudentListView: React.FC<{ role: UserRole; userId: string }> = ({ role, u
         setAvailableGroups(allGroups);
 
       } else if (role === UserRole.DOCENTE) {
-        const { data: teacherGroups } = await supabase.from('grupos').select('nombre_grupo').eq('docente_id', userId);
+        const { data: activeCycle } = await supabase
+          .from('ciclos_escolares')
+          .select('id')
+          .eq('es_activo', true)
+          .maybeSingle();
+
+        let gQuery = supabase.from('grupos').select('nombre_grupo').eq('docente_id', userId);
+        if (activeCycle) {
+          gQuery = gQuery.or(`ciclo_id.eq.${activeCycle.id},ciclo_id.is.null`);
+        }
+
+        const { data: teacherGroups } = await gQuery;
         const teacherGroupNames = Array.from(new Set((teacherGroups?.map(g => g.nombre_grupo) || []) as string[])).sort();
         setAvailableGroups(teacherGroupNames);
       } else {
@@ -106,12 +117,26 @@ const StudentListView: React.FC<{ role: UserRole; userId: string }> = ({ role, u
         query = query.or(orConditions.join(','));
 
       } else if (role === UserRole.DOCENTE) {
-        const { data: groups } = await supabase.from('grupos').select('id, nombre_grupo').eq('docente_id', userId);
+        const { data: activeCycle } = await supabase
+          .from('ciclos_escolares')
+          .select('id')
+          .eq('es_activo', true)
+          .maybeSingle();
+
+        let gQuery = supabase.from('grupos').select('id, nombre_grupo, ciclo_id').eq('docente_id', userId);
+        if (activeCycle) {
+          gQuery = gQuery.or(`ciclo_id.eq.${activeCycle.id},ciclo_id.is.null`);
+        }
+
+        const { data: groups } = await gQuery;
         const names = Array.from(new Set((groups || []).map(g => g.nombre_grupo)));
         teacherGroupIds = (groups || []).map(g => g.id);
 
         if (names.length > 0) {
           query = query.in('grupo', names);
+          if (activeCycle) {
+            query = query.or(`ciclo_id.eq.${activeCycle.id},ciclo_id.is.null`);
+          }
         } else {
           setStudents([]); setLoading(false); return;
         }

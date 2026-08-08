@@ -26,6 +26,7 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, userId, 
   const [interventions, setInterventions] = useState<any[]>([]);
   const [loadingInterventions, setLoadingInterventions] = useState(false);
   const [academicHistory, setAcademicHistory] = useState<AcademicRecord[]>([]);
+  const [cycleTrajectoryRecords, setCycleTrajectoryRecords] = useState<any[]>([]);
   const [loadingAcademic, setLoadingAcademic] = useState(false);
   const [totalInterventionsCount, setTotalInterventionsCount] = useState(0);
   const [detailedAttendance, setDetailedAttendance] = useState<{ fecha: string; presente: boolean; grupo: string }[]>([]);
@@ -118,6 +119,15 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, userId, 
       });
 
       setAcademicHistory(processedHistory);
+
+      // 3. Obtener trayectoria registrada por periodos de ciclo escolar
+      const { data: trajectoryData } = await supabase
+        .from('historial_estudiantes_ciclo')
+        .select('*, ciclos_escolares(nombre)')
+        .eq('estudiante_id', student.id)
+        .order('created_at', { ascending: false });
+
+      setCycleTrajectoryRecords(trajectoryData || []);
     } catch (err) {
       console.error("Error al sincronizar historial:", err);
     } finally {
@@ -590,6 +600,57 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, userId, 
                           </td>
                         </tr>
                       ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* SECCIÓN DE TRAYECTORIA POR PERIODO DEL CICLO ESCOLAR */}
+              <div className="bg-white border border-gray-100 rounded-[3rem] p-8 overflow-hidden shadow-sm space-y-4">
+                <div className="flex items-center gap-3 mb-2">
+                  <span className="text-xl">📅</span>
+                  <div>
+                    <h4 className="font-black text-[#003B5C] text-sm uppercase tracking-wider">Trayectoria por Periodo del Ciclo Escolar</h4>
+                    <p className="text-[10px] text-gray-400 font-bold">Historial de asignación de grupo, semestre y desempeño por periodo</p>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto rounded-2xl border border-gray-100">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-[#003B5C]/5 text-[9px] font-black uppercase text-[#003B5C] border-b tracking-widest">
+                      <tr>
+                        <th className="p-4">Periodo / Ciclo</th>
+                        <th className="p-4">Grupo Asignado</th>
+                        <th className="p-4 text-center">Semestre</th>
+                        <th className="p-4 text-center">Asistencia</th>
+                        <th className="p-4 text-right">Riesgo Periodo</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50 font-medium">
+                      {cycleTrajectoryRecords.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="p-6 text-center text-gray-400 font-bold uppercase text-[10px]">
+                            Sin registros históricos en periodos anteriores
+                          </td>
+                        </tr>
+                      ) : (
+                        cycleTrajectoryRecords.map((item, i) => {
+                          const cycleName = getRelation(item.ciclos_escolares)?.nombre || 'Periodo Escolar';
+                          return (
+                            <tr key={i} className="hover:bg-blue-50/20">
+                              <td className="p-4 font-bold text-gray-900">{cycleName}</td>
+                              <td className="p-4 text-gray-700 font-semibold">{item.grupo} ({item.carrera})</td>
+                              <td className="p-4 text-center font-bold text-gray-800">{item.semestre}° Semestre</td>
+                              <td className="p-4 text-center font-bold text-blue-700">{item.porcentaje_asistencia || 100}%</td>
+                              <td className="p-4 text-right">
+                                <span className={`px-3 py-1 rounded-lg text-[8px] font-black uppercase border ${RISK_COLORS[item.nivel_riesgo as RiskLevel]}`}>
+                                  {RISK_LABELS[item.nivel_riesgo as RiskLevel]}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
                     </tbody>
                   </table>
                 </div>

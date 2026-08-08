@@ -32,10 +32,22 @@ const GroupView: React.FC<{ userId: string; role: UserRole }> = ({ userId, role 
     if (!userId) return;
     setLoading(true);
     try {
-      const { data, error } = await supabase
+      const { data: activeCycle } = await supabase
+        .from('ciclos_escolares')
+        .select('id')
+        .eq('es_activo', true)
+        .maybeSingle();
+
+      let query = supabase
         .from('grupos')
-        .select('id, nombre_grupo, turno, materias (nombre, carrera, semestre)')
+        .select('id, nombre_grupo, turno, ciclo_id, materias (nombre, carrera, semestre)')
         .eq('docente_id', userId);
+
+      if (activeCycle) {
+        query = query.or(`ciclo_id.eq.${activeCycle.id},ciclo_id.is.null`);
+      }
+
+      const { data, error } = await query;
       if (error) throw error;
       setAssignedGroups(data || []);
       if (data && data.length > 0) setSelectedGroupId(data[0].id);
@@ -47,13 +59,66 @@ const GroupView: React.FC<{ userId: string; role: UserRole }> = ({ userId, role 
     if (!group) return;
     setLoadingStudents(true);
     try {
-      const { data: studentData } = await supabase.from('estudiantes').select('*').eq('grupo', group.nombre_grupo).order('nombre', { ascending: true });
-      const { data: attendanceData } = await supabase.from('asistencias').select('estudiante_id, presente').eq('grupo_id', groupId).eq('fecha', date);
+      const { data: activeCycle } = await supabase
+        .from('ciclos_escolares')
+        .select('id')
+        .eq('es_activo', true)
+        .maybeSingle();
 
-      const mapped: Student[] = (studentData || []).map(s => ({
+      const targetCycleId = (group as any).ciclo_id || activeCycle?.id;
+
+      // 1. Consultar en historial_estudiantes_ciclo para el periodo activo
+      let studentData: any[] = [];
+      if (targetCycleId) {
+        const { data: histData } = await supabase
+          .from('historial_estudiantes_ciclo')
+          .select('*, estudiantes(*)')
+          .eq('ciclo_id', targetCycleId)
+          .eq('grupo', group.nombre_grupo);
+
+        if (histData && histData.length > 0) {
+          studentData = histData.map(h => {
+            const st = getRelation(h.estudiantes);
+            return {
+              id: h.estudiante_id,
+              nombre: st?.nombre || 'Estudiante',
+              carrera: h.carrera || st?.carrera,
+              semestre: h.semestre || st?.semestre,
+              grupo: h.grupo,
+              turno: h.turno || st?.turno,
+              promedio_acumulado: h.promedio_acumulado !== undefined ? h.promedio_acumulado : st?.promedio_acumulado,
+              porcentaje_asistencia: h.porcentaje_asistencia !== undefined ? h.porcentaje_asistencia : st?.porcentaje_asistencia,
+              nivel_riesgo: h.nivel_riesgo || st?.nivel_riesgo,
+              factores_personales: st?.factores_personales || [],
+              factores_academicos: st?.factores_academicos || [],
+              factores_institucionales: st?.factores_institucionales || [],
+              ciclo_id: h.ciclo_id
+            };
+          });
+        }
+      }
+
+      // 2. Si no hay historial específico en esa tabla, consultar en estudiantes directamente
+      if (studentData.length === 0) {
+        const { data: rawStudents } = await supabase
+          .from('estudiantes')
+          .select('*')
+          .eq('grupo', group.nombre_grupo)
+          .order('nombre', { ascending: true });
+
+        studentData = rawStudents || [];
+      }
+
+      const { data: attendanceData } = await supabase
+        .from('asistencias')
+        .select('estudiante_id, presente')
+        .eq('grupo_id', groupId)
+        .eq('fecha', date);
+
+      const mapped: Student[] = studentData.map(s => ({
         id: s.id, name: s.nombre, career: s.carrera as any, semester: s.semestre,
-        group: s.grupo, shift: s.turno as any, average: Number(s.promedio_acumulado),
-        attendance: s.porcentaje_asistencia, risk: s.nivel_riesgo as RiskLevel,
+        group: s.grupo, shift: s.turno as any, average: Number(s.promedio_acumulado || 0),
+        attendance: s.porcentaje_asistencia || 100, risk: (s.nivel_riesgo || 'LOW') as RiskLevel,
         personalFactors: s.factores_personales || [], academicFactors: s.factores_academicos || [],
         institutionalFactors: s.factores_institucionales || [], ciclo_id: s.ciclo_id
       }));

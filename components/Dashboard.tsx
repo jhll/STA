@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { RISK_COLORS, RISK_LABELS, calculateRisk, UAS_COLORS, RISK_CHART_COLORS } from '../constants';
 import { Student, RiskLevel, UserRole } from '../types';
 import StudentProfile from './StudentProfile';
+import TeacherCertificateModal from './TeacherCertificateModal';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { supabase } from '../services/supabaseClient';
 
@@ -11,6 +12,7 @@ import fcqbLogo from './images/fcqb_logo.png';
 
 const Dashboard: React.FC<{ role: UserRole; userId: string }> = ({ role, userId }) => {
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
+  const [showTeacherCertificateModal, setShowTeacherCertificateModal] = useState(false);
   const [students, setStudents] = useState<Student[]>([]);
   const [totalEnrollment, setTotalEnrollment] = useState<number>(0);
   const [totalHighRisk, setTotalHighRisk] = useState<number>(0);
@@ -70,9 +72,24 @@ const Dashboard: React.FC<{ role: UserRole; userId: string }> = ({ role, userId 
         }
       }
 
-      // LÓGICA PARA DOCENTE
+      // LÓGICA PARA DOCENTE (únicamente periodo del ciclo escolar activo)
       else if (role === UserRole.DOCENTE) {
-        const { data: groups } = await supabase.from('grupos').select('nombre_grupo').eq('docente_id', userId);
+        const { data: activeCycle } = await supabase
+          .from('ciclos_escolares')
+          .select('id')
+          .eq('es_activo', true)
+          .maybeSingle();
+
+        let groupsQuery = supabase
+          .from('grupos')
+          .select('nombre_grupo, ciclo_id')
+          .eq('docente_id', userId);
+
+        if (activeCycle) {
+          groupsQuery = groupsQuery.or(`ciclo_id.eq.${activeCycle.id},ciclo_id.is.null`);
+        }
+
+        const { data: groups } = await groupsQuery;
         const groupNames = Array.from(new Set((groups || []).map(g => g.nombre_grupo)));
 
         // Check for Accentuations Subgroups (convention: "SUB - <Nombre>")
@@ -137,6 +154,10 @@ const Dashboard: React.FC<{ role: UserRole; userId: string }> = ({ role, userId 
           if (teacherNormalGroups.length > 0) conditions.push(`grupo.in.(${teacherNormalGroups.map(g => `"${g}"`).join(',')})`);
           if (teacherExtraStudentIds.length > 0) conditions.push(`id.in.(${teacherExtraStudentIds.map(id => `"${id}"`).join(',')})`);
 
+          if (activeCycle) {
+            q = q.or(`ciclo_id.eq.${activeCycle.id},ciclo_id.is.null`);
+          }
+
           if (conditions.length > 1) return q.or(conditions.join(','));
           if (conditions.length === 1) {
             if (teacherNormalGroups.length > 0) return q.in('grupo', teacherNormalGroups);
@@ -144,7 +165,11 @@ const Dashboard: React.FC<{ role: UserRole; userId: string }> = ({ role, userId 
           }
           return q;
         }
-        if (filterGroups.length > 0) return q.in('grupo', filterGroups);
+        if (filterGroups.length > 0) {
+          if (activeCycle) q = q.or(`ciclo_id.eq.${activeCycle.id},ciclo_id.is.null`);
+          return q.in('grupo', filterGroups);
+        }
+        if (activeCycle) q = q.or(`ciclo_id.eq.${activeCycle.id},ciclo_id.is.null`);
         return q;
       };
 
@@ -222,6 +247,18 @@ const Dashboard: React.FC<{ role: UserRole; userId: string }> = ({ role, userId 
                   ? `Atención prioritaria: Se detectaron ${totalHighRisk} estudiantes en situación de riesgo alto institucional.`
                   : "La trayectoria académica de la matrícula asignada se mantiene estable."}
             </p>
+
+            {role === UserRole.DOCENTE && (
+              <div className="mt-6 flex justify-center lg:justify-start">
+                <button
+                  onClick={() => setShowTeacherCertificateModal(true)}
+                  className="inline-flex items-center gap-3 bg-[#FFD100] text-[#003B5C] px-6 py-3.5 rounded-xl font-black text-xs uppercase tracking-widest hover:bg-white hover:shadow-2xl transition-all active:scale-95 border-2 border-transparent hover:border-[#FFD100] group shadow-lg"
+                >
+                  <span className="text-xl group-hover:rotate-12 transition-transform">📜</span>
+                  <span>Generar Constancia de Cumplimiento Docente</span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -320,6 +357,10 @@ const Dashboard: React.FC<{ role: UserRole; userId: string }> = ({ role, userId 
       </div>
 
       {selectedStudent && <StudentProfile student={selectedStudent} role={role} userId={userId} onClose={() => setSelectedStudent(null)} />}
+      
+      {showTeacherCertificateModal && (
+        <TeacherCertificateModal userId={userId} onClose={() => setShowTeacherCertificateModal(false)} />
+      )}
     </div>
   );
 };

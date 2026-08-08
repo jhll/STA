@@ -37,7 +37,23 @@ const ActivitiesModule: React.FC<ActivitiesModuleProps> = ({ userId, role }) => 
     if (!userId) return;
     setLoading(true);
     try {
-      const { data, error } = await supabase.from('actividades').select('*, grupos(nombre_grupo)').eq('docente_id', userId).order('created_at', { ascending: false });
+      const { data: activeCycle } = await supabase
+        .from('ciclos_escolares')
+        .select('id')
+        .eq('es_activo', true)
+        .maybeSingle();
+
+      let query = supabase
+        .from('actividades')
+        .select('*, grupos(nombre_grupo)')
+        .eq('docente_id', userId)
+        .order('created_at', { ascending: false });
+
+      if (activeCycle) {
+        query = query.or(`ciclo_id.eq.${activeCycle.id},ciclo_id.is.null`);
+      }
+
+      const { data, error } = await query;
       if (error) throw error;
       setActivities(data?.map(a => ({ ...a, grupo_nombre: getRelation(a.grupos)?.nombre_grupo })) || []);
     } catch (err) { console.error(err); } finally { setLoading(false); }
@@ -46,7 +62,22 @@ const ActivitiesModule: React.FC<ActivitiesModuleProps> = ({ userId, role }) => 
   const fetchAssignedGroups = async () => {
     if (!userId) return;
     try {
-      const { data } = await supabase.from('grupos').select('id, nombre_grupo, materias(nombre)').eq('docente_id', userId);
+      const { data: activeCycle } = await supabase
+        .from('ciclos_escolares')
+        .select('id')
+        .eq('es_activo', true)
+        .maybeSingle();
+
+      let query = supabase
+        .from('grupos')
+        .select('id, nombre_grupo, ciclo_id, materias(nombre)')
+        .eq('docente_id', userId);
+
+      if (activeCycle) {
+        query = query.or(`ciclo_id.eq.${activeCycle.id},ciclo_id.is.null`);
+      }
+
+      const { data } = await query;
       setAssignedGroups(data || []);
       if (data && data.length > 0 && !newActivity.grupo_id) {
         setNewActivity(prev => ({ ...prev, grupo_id: data[0].id }));
@@ -54,7 +85,18 @@ const ActivitiesModule: React.FC<ActivitiesModuleProps> = ({ userId, role }) => 
     } catch (err) { console.error(err); }
   };
 
-  useEffect(() => { fetchActivities(); fetchAssignedGroups(); }, [userId]);
+  useEffect(() => {
+    fetchActivities();
+    fetchAssignedGroups();
+
+    const handleCycleUpdate = () => {
+      fetchActivities();
+      fetchAssignedGroups();
+    };
+
+    window.addEventListener('sta-cycle-updated', handleCycleUpdate);
+    return () => window.removeEventListener('sta-cycle-updated', handleCycleUpdate);
+  }, [userId]);
 
   const handleOpenEdit = (activity: Activity) => {
     setEditingId(activity.id);
@@ -87,6 +129,12 @@ const ActivitiesModule: React.FC<ActivitiesModuleProps> = ({ userId, role }) => 
     e.preventDefault();
     setIsSaving(true);
     try {
+      const { data: activeCycle } = await supabase
+        .from('ciclos_escolares')
+        .select('id')
+        .eq('es_activo', true)
+        .maybeSingle();
+
       const payload = {
         titulo: newActivity.titulo.trim(),
         descripcion: newActivity.descripcion.trim(),
@@ -95,7 +143,8 @@ const ActivitiesModule: React.FC<ActivitiesModuleProps> = ({ userId, role }) => 
         grupo_id: newActivity.grupo_id,
         docente_id: userId,
         fecha_entrega: new Date(newActivity.fecha_entrega).toISOString(),
-        puntos_max: Math.floor(Number(newActivity.puntos_max))
+        puntos_max: Math.floor(Number(newActivity.puntos_max)),
+        ciclo_id: activeCycle?.id || null
       };
 
       if (isEditing && editingId) {
@@ -189,7 +238,43 @@ const ActivitiesModule: React.FC<ActivitiesModuleProps> = ({ userId, role }) => 
   const startEvaluation = async (activity: Activity) => {
     setEvaluatingActivity(activity);
     try {
-      const { data: students } = await supabase.from('estudiantes').select('*').eq('grupo', activity.grupo_nombre).order('nombre', { ascending: true });
+      const { data: activeCycle } = await supabase
+        .from('ciclos_escolares')
+        .select('id')
+        .eq('es_activo', true)
+        .maybeSingle();
+
+      let students: any[] = [];
+      if (activeCycle) {
+        const { data: histData } = await supabase
+          .from('historial_estudiantes_ciclo')
+          .select('*, estudiantes(*)')
+          .eq('ciclo_id', activeCycle.id)
+          .eq('grupo', activity.grupo_nombre);
+
+        if (histData && histData.length > 0) {
+          students = histData.map(h => {
+            const st = getRelation(h.estudiantes);
+            return {
+              id: h.estudiante_id,
+              nombre: st?.nombre || 'Estudiante',
+              carrera: h.carrera || st?.carrera,
+              semestre: h.semestre || st?.semestre,
+              grupo: h.grupo
+            };
+          });
+        }
+      }
+
+      if (students.length === 0) {
+        const { data: rawStudents } = await supabase
+          .from('estudiantes')
+          .select('*')
+          .eq('grupo', activity.grupo_nombre)
+          .order('nombre', { ascending: true });
+        students = rawStudents || [];
+      }
+
       const { data: existingGrades } = await supabase.from('calificaciones').select('*').eq('actividad_id', activity.id);
       setActivityStudents(students || []);
       const map: Record<string, Partial<Grade>> = {};

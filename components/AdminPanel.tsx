@@ -40,6 +40,7 @@ const AdminPanel: React.FC = () => {
   const [tutorias, setTutorias] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeCycleId, setActiveCycleId] = useState<string | null>(null);
+  const [selectedCycleId, setSelectedCycleId] = useState<string | null>(null);
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
 
   const [groupsMetadata, setGroupsMetadata] = useState<{ grupo: string, carrera: string, semestre: number, turno: string }[]>([]);
@@ -79,6 +80,43 @@ const AdminPanel: React.FC = () => {
     grupo: '',
     turno: 'Matutino'
   });
+
+  const [searchingMatricula, setSearchingMatricula] = useState(false);
+  const [foundExistingStudent, setFoundExistingStudent] = useState<any | null>(null);
+
+  const handleSearchMatricula = async (matriculaToSearch: string) => {
+    const cleanId = matriculaToSearch.trim();
+    if (!cleanId || isEditingStudent) return;
+
+    setSearchingMatricula(true);
+    try {
+      const { data, error } = await supabase
+        .from('estudiantes')
+        .select('*')
+        .eq('id', cleanId)
+        .maybeSingle();
+
+      if (!error && data) {
+        setFoundExistingStudent(data);
+        const nextSemester = data.semestre < 10 ? data.semestre + 1 : 10;
+        setNewStudent(prev => ({
+          ...prev,
+          matricula: data.id,
+          nombre: data.nombre,
+          carrera: data.carrera as Career,
+          semestre: nextSemester,
+          turno: data.turno || 'Matutino'
+        }));
+      } else {
+        setFoundExistingStudent(null);
+      }
+    } catch (err) {
+      console.error("Error al buscar estudiante por matrícula:", err);
+      setFoundExistingStudent(null);
+    } finally {
+      setSearchingMatricula(false);
+    }
+  };
 
   // New State for Student Assignment
   const [tutorModalFilters, setTutorModalFilters] = useState({ career: '', semester: '', group: '' });
@@ -125,7 +163,7 @@ const AdminPanel: React.FC = () => {
       while (hasMore) {
         const { data, error } = await supabase
           .from('grupos')
-          .select('*, materias(*), docentes(*)')
+          .select('*, materias(*), docentes(*), ciclos_escolares(*)')
           .order('created_at', { ascending: false })
           .range(page * pageSize, (page + 1) * pageSize - 1);
 
@@ -146,7 +184,7 @@ const AdminPanel: React.FC = () => {
       while (hasMore) {
         const { data, error } = await supabase
           .from('tutorias')
-          .select('*, docentes(*), estudiantes(*)')
+          .select('*, docentes(*), estudiantes(*), ciclos_escolares(*)')
           .order('created_at', { ascending: false })
           .range(page * pageSize, (page + 1) * pageSize - 1);
 
@@ -161,11 +199,12 @@ const AdminPanel: React.FC = () => {
       setTutorias(allTutorias);
 
 
-      const active = cRes.data?.find(c => c.es_activo);
+      const active = cRes.data?.find(c => c.es_activo) || cRes.data?.[0];
       if (active) {
         setActiveCycleId(active.id);
-        setNewGroup(p => ({ ...p, ciclo_id: active.id }));
-        setNewTutoria(p => ({ ...p, ciclo_id: active.id }));
+        setSelectedCycleId(prev => prev || active.id);
+        setNewGroup(p => ({ ...p, ciclo_id: p.ciclo_id || active.id }));
+        setNewTutoria(p => ({ ...p, ciclo_id: p.ciclo_id || active.id }));
       }
 
       // CORRECCIÓN PARA MATRÍCULAS GRANDES: Paginación para obtener TODOS los grupos
@@ -319,7 +358,22 @@ const AdminPanel: React.FC = () => {
           const { error } = await supabase.from('estudiantes').upsert(formatted, { onConflict: 'id' });
           if (error) throw error;
 
-          alert(`✅ Se han sincronizado ${formatted.length} estudiantes.`);
+          if (cycle) {
+            const historyRecords = formatted.map(s => ({
+              estudiante_id: s.id,
+              ciclo_id: cycle,
+              grupo: s.grupo,
+              carrera: s.carrera,
+              semestre: s.semestre,
+              turno: s.turno,
+              promedio_acumulado: 0,
+              porcentaje_asistencia: 100,
+              nivel_riesgo: 'LOW'
+            }));
+            await supabase.from('historial_estudiantes_ciclo').upsert(historyRecords, { onConflict: 'estudiante_id,ciclo_id' });
+          }
+
+          alert(`✅ Se han sincronizado ${formatted.length} estudiantes en el periodo escolar.`);
           setShowCsvModal(false);
           fetchData();
         } catch (err: any) {
@@ -369,10 +423,13 @@ const AdminPanel: React.FC = () => {
         }
       }
 
+      const targetCycleId = newGroup.ciclo_id || activeCycleId;
+      const groupPayload = { ...newGroup, materia_id: finalMateriaId, ciclo_id: targetCycleId };
+
       if (isEditingGroup && editingGroupId) {
-        await supabase.from('grupos').update({ ...newGroup, materia_id: finalMateriaId }).eq('id', editingGroupId);
+        await supabase.from('grupos').update(groupPayload).eq('id', editingGroupId);
       } else {
-        await supabase.from('grupos').insert([{ ...newGroup, materia_id: finalMateriaId }]);
+        await supabase.from('grupos').insert([groupPayload]);
       }
       setShowGroupModal(false);
       fetchData();
@@ -474,44 +531,79 @@ const AdminPanel: React.FC = () => {
     e.preventDefault();
     setIsSaving(true);
     try {
-      if (isEditingStudent && editingStudentId) {
-        // Edit existing student
+      const cycleToAssign = selectedCycleId || activeCycleId;
+      const targetId = (isEditingStudent && editingStudentId ? editingStudentId : newStudent.matricula).trim();
+
+      if (!targetId) throw new Error("Debes proporcionar una matrícula válida.");
+
+      if (isEditingStudent || foundExistingStudent) {
+        // Alumno existente: Actualizar datos y reinscribir en el ciclo nuevo sin incrementar la matrícula total
         const { error } = await supabase.from('estudiantes').update({
           nombre: newStudent.nombre,
           carrera: newStudent.carrera,
           semestre: newStudent.semestre,
           grupo: newStudent.grupo,
           turno: newStudent.turno,
-        }).eq('id', editingStudentId);
+          ciclo_id: cycleToAssign
+        }).eq('id', targetId);
 
         if (error) throw error;
       } else {
-        // Create new student
-        const { data: existing } = await supabase.from('estudiantes').select('id').eq('id', newStudent.matricula).single();
-        if (existing) throw new Error("La matrícula ya está registrada.");
+        // Verificar en DB si el estudiante ya existía previamente
+        const { data: dbExisting } = await supabase.from('estudiantes').select('id').eq('id', targetId).maybeSingle();
 
-        const { error } = await supabase.from('estudiantes').insert([{
-          id: newStudent.matricula,
-          nombre: newStudent.nombre,
+        if (dbExisting) {
+          // El alumno ya existe en DB: Actualizarlo sin duplicar matrícula
+          const { error } = await supabase.from('estudiantes').update({
+            nombre: newStudent.nombre,
+            carrera: newStudent.carrera,
+            semestre: newStudent.semestre,
+            grupo: newStudent.grupo,
+            turno: newStudent.turno,
+            ciclo_id: cycleToAssign
+          }).eq('id', targetId);
+
+          if (error) throw error;
+        } else {
+          // Alumno verdaderamente nuevo: Registrar en DB (se incrementa la matrícula total)
+          const { error } = await supabase.from('estudiantes').insert([{
+            id: targetId,
+            nombre: newStudent.nombre,
+            carrera: newStudent.carrera,
+            semestre: newStudent.semestre,
+            grupo: newStudent.grupo,
+            turno: newStudent.turno,
+            ciclo_id: cycleToAssign,
+            promedio_acumulado: 0,
+            porcentaje_asistencia: 100,
+            nivel_riesgo: 'LOW'
+          }]);
+
+          if (error) throw error;
+        }
+      }
+
+      if (cycleToAssign && targetId) {
+        await supabase.from('historial_estudiantes_ciclo').upsert([{
+          estudiante_id: targetId,
+          ciclo_id: cycleToAssign,
+          grupo: newStudent.grupo,
           carrera: newStudent.carrera,
           semestre: newStudent.semestre,
-          grupo: newStudent.grupo,
           turno: newStudent.turno,
-          // email column does not exist in schema
           promedio_acumulado: 0,
           porcentaje_asistencia: 100,
           nivel_riesgo: 'LOW'
-        }]);
-
-        if (error) throw error;
+        }], { onConflict: 'estudiante_id,ciclo_id' });
       }
 
       setShowStudentModal(false);
       setNewStudent({ matricula: '', nombre: '', carrera: Career.QFB, semestre: 1, grupo: '', turno: 'Matutino' });
+      setFoundExistingStudent(null);
       setIsEditingStudent(false);
       setEditingStudentId(null);
-      fetchData(); // Refresh assignments/students
-      alert(isEditingStudent ? "✅ Estudiante actualizado correctamente." : "✅ Estudiante registrado correctamente.");
+      fetchData();
+      alert(foundExistingStudent ? "✅ Estudiante existente reinscrito al periodo sin duplicar matrícula." : "✅ Estudiante registrado en la matrícula.");
     } catch (err: any) {
       alert("Error: " + err.message);
     } finally {
@@ -613,6 +705,10 @@ const AdminPanel: React.FC = () => {
   )).sort();
 
   const filteredGroups = groups.filter(g => {
+    if (selectedCycleId) {
+      if (g.ciclo_id && g.ciclo_id !== selectedCycleId) return false;
+      if (!g.ciclo_id && activeCycleId && selectedCycleId !== activeCycleId) return false;
+    }
     const mat = getRelation(g.materias);
     const doc = getRelation(g.docentes);
 
@@ -627,6 +723,10 @@ const AdminPanel: React.FC = () => {
   });
 
   const filteredTutorias = tutorias.filter((t: any) => {
+    if (selectedCycleId) {
+      if (t.ciclo_id && t.ciclo_id !== selectedCycleId) return false;
+      if (!t.ciclo_id && activeCycleId && selectedCycleId !== activeCycleId) return false;
+    }
     const tutorName: string = String(getRelation(t.docentes)?.nombre || '');
     // Handle both new Student relation and legacy Group name
     const studentRel = getRelation(t.estudiantes);
@@ -674,7 +774,10 @@ const AdminPanel: React.FC = () => {
   )).sort();
 
   const filteredStudentsTab = students.filter(s => {
-    // Explicitly casting properties to string for normalizeText safety
+    if (selectedCycleId) {
+      if (s.ciclo_id && s.ciclo_id !== selectedCycleId) return false;
+      if (!s.ciclo_id && activeCycleId && selectedCycleId !== activeCycleId) return false;
+    }
     const searchMatch = !studentTabFilters.search ||
       normalizeText(s.name).includes(normalizeText(studentTabFilters.search)) ||
       normalizeText(s.id).includes(normalizeText(studentTabFilters.search));
@@ -741,7 +844,30 @@ const AdminPanel: React.FC = () => {
         <div className="p-10 bg-[#003B5C] text-white flex flex-col md:flex-row justify-between items-center gap-6 relative">
           <div>
             <h2 className="text-4xl font-black tracking-tighter">Administración STA</h2>
-            <p className="text-blue-100 opacity-80 font-medium text-sm uppercase tracking-widest mt-1">Gestión Centralizada FCQB</p>
+            <div className="flex items-center gap-3 mt-2 flex-wrap">
+              <span className="text-blue-100 opacity-80 font-medium text-sm uppercase tracking-widest">Gestión Centralizada FCQB</span>
+              {cycles.length > 0 && (
+                <div className="flex items-center gap-2 bg-white/10 px-3.5 py-1.5 rounded-xl border border-white/20">
+                  <span className="text-[#FFD100] text-xs font-black uppercase tracking-wider">📅 Periodo:</span>
+                  <select
+                    value={selectedCycleId || ''}
+                    onChange={(e) => {
+                      const cId = e.target.value;
+                      setSelectedCycleId(cId);
+                      setNewGroup(p => ({ ...p, ciclo_id: cId }));
+                      setNewTutoria(p => ({ ...p, ciclo_id: cId }));
+                    }}
+                    className="bg-white text-[#003B5C] font-black text-xs px-3 py-1 rounded-lg outline-none cursor-pointer shadow-md"
+                  >
+                    {cycles.map(c => (
+                      <option key={c.id} value={c.id} className="text-gray-900 font-bold">
+                        {c.nombre} {c.es_activo ? '(Activo)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
           </div>
           <div className="flex flex-wrap justify-center gap-3">
             {activeTab === 'users' && <button onClick={() => { setIsEditingUser(false); setNewUser({ numero_empleado: '', nombre: '', email: '', password: '', rol: [UserRole.DOCENTE] }); setShowUserModal(true); }} className="bg-[#FFD100] text-[#003B5C] px-8 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl hover:scale-105 transition-all">+ Nuevo Personal</button>}
@@ -962,7 +1088,11 @@ const AdminPanel: React.FC = () => {
                                 }
                               </p>
                             </td>
-                            <td className="px-10 py-5 text-[10px] font-black text-gray-400 uppercase">{getRelation(t.ciclos_escolares)?.nombre}</td>
+                            <td className="px-10 py-5">
+                              <span className="px-3 py-1 bg-blue-50 text-[#003B5C] font-black text-[10px] uppercase rounded-lg border border-blue-100 shadow-sm tracking-wider inline-block whitespace-nowrap">
+                                {getRelation(t.ciclos_escolares)?.nombre || cycles.find(c => c.id === t.ciclo_id)?.nombre || (t.ciclo_id ? t.ciclo_id : (cycles.find(c => c.es_activo)?.nombre || '2025-2026-2'))}
+                              </span>
+                            </td>
                             <td className="px-10 py-5 text-right opacity-0 group-hover:opacity-100 transition-opacity">
                               <button onClick={() => { setEditingTutoriaId(t.id); setIsEditingTutoria(true); setNewTutoria({ nombre_grupo: t.nombre_grupo, tutor_id: t.tutor_id, ciclo_id: t.ciclo_id }); setShowTutorModal(true); }} className="p-3 text-blue-600 hover:bg-blue-50 rounded-xl">✏️</button>
                               <button onClick={() => handleDeleteTutoria(t.id)} className="p-3 text-red-500 hover:bg-red-50 rounded-xl ml-2">🗑️</button>
@@ -1011,7 +1141,11 @@ const AdminPanel: React.FC = () => {
                             </td>
                             <td className="px-10 py-5 text-blue-700 font-black">{getRelation(g.docentes)?.nombre}</td>
                             <td className="px-10 py-5 font-mono text-[#003B5C] font-black bg-blue-50/30 text-center rounded-lg">{g.nombre_grupo}</td>
-                            <td className="px-10 py-5 text-[10px] font-black text-gray-400 uppercase">{getRelation(g.ciclos_escolares)?.nombre}</td>
+                            <td className="px-10 py-5">
+                              <span className="px-3 py-1 bg-blue-50 text-[#003B5C] font-black text-[10px] uppercase rounded-lg border border-blue-100 shadow-sm tracking-wider inline-block whitespace-nowrap">
+                                {getRelation(g.ciclos_escolares)?.nombre || cycles.find(c => c.id === g.ciclo_id)?.nombre || (g.ciclo_id ? g.ciclo_id : (cycles.find(c => c.es_activo)?.nombre || '2025-2026-2'))}
+                              </span>
+                            </td>
                             <td className="px-10 py-5 text-right opacity-0 group-hover:opacity-100 transition-opacity">
                               <button onClick={() => { setEditingGroupId(g.id); setIsEditingGroup(true); setNewGroup({ nombre_grupo: g.nombre_grupo, materia_id: g.materia_id, docente_id: g.docente_id, turno: g.turno, ciclo_id: g.ciclo_id }); setShowGroupModal(true); }} className="p-3 text-blue-600 hover:bg-blue-50 rounded-xl">✏️</button>
                               <button onClick={() => handleDeleteGroup(g.id)} className="p-3 text-red-500 hover:bg-red-50 rounded-xl ml-2">🗑️</button>
@@ -1518,10 +1652,60 @@ const AdminPanel: React.FC = () => {
       {showStudentModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-[110] p-4">
           <div className="bg-white rounded-[3.5rem] shadow-2xl w-full max-w-md p-10 animate-in zoom-in-95">
-            <h3 className="text-2xl font-black text-[#003B5C] mb-8">Nuevo Estudiante</h3>
+            <h3 className="text-2xl font-black text-[#003B5C] mb-4">{isEditingStudent ? 'Editar Estudiante' : 'Nuevo Estudiante'}</h3>
+            <div className="mb-6 p-3.5 bg-blue-50/80 border border-blue-100 rounded-2xl flex items-center justify-between">
+              <span className="text-[10px] font-black text-[#003B5C] uppercase tracking-wider flex items-center gap-1.5">
+                <span>📅</span> Periodo Asignado:
+              </span>
+              <span className="text-xs font-black text-blue-900 bg-white px-3 py-1 rounded-xl shadow-sm border border-blue-100">
+                {cycles.find(c => c.id === (selectedCycleId || activeCycleId))?.nombre || 'Periodo Activo'}
+              </span>
+            </div>
             <form onSubmit={handleSaveStudent} className="space-y-5">
-              <input type="text" className="w-full bg-gray-50 border p-4 rounded-xl font-bold text-sm" placeholder="Matrícula (ID)" value={newStudent.matricula} onChange={e => setNewStudent({ ...newStudent, matricula: e.target.value })} required />
-              <input type="text" className="w-full bg-gray-50 border p-4 rounded-xl font-bold text-sm" placeholder="Nombre Completo" value={newStudent.nombre} onChange={e => setNewStudent({ ...newStudent, nombre: e.target.value })} required />
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Matrícula (ID)</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    className="flex-1 bg-gray-50 border p-4 rounded-xl font-bold text-sm outline-none focus:ring-2 focus:ring-[#003B5C]/20"
+                    placeholder="Matrícula (Ej: 21234567)"
+                    value={newStudent.matricula}
+                    onChange={e => {
+                      setNewStudent({ ...newStudent, matricula: e.target.value });
+                      if (foundExistingStudent && e.target.value.trim() !== foundExistingStudent.id) {
+                        setFoundExistingStudent(null);
+                      }
+                    }}
+                    onBlur={e => handleSearchMatricula(e.target.value)}
+                    disabled={isEditingStudent}
+                    required
+                  />
+                  {!isEditingStudent && (
+                    <button
+                      type="button"
+                      onClick={() => handleSearchMatricula(newStudent.matricula)}
+                      disabled={searchingMatricula || !newStudent.matricula.trim()}
+                      className="px-4 bg-[#003B5C] text-white rounded-xl font-black text-xs uppercase hover:bg-blue-800 transition-all disabled:opacity-50 flex items-center gap-1 shrink-0"
+                    >
+                      {searchingMatricula ? '...' : '🔍 Buscar'}
+                    </button>
+                  )}
+                </div>
+                {foundExistingStudent ? (
+                  <p className="text-[10px] font-black text-emerald-600 mt-1 ml-1 leading-tight flex items-center gap-1">
+                    <span>⚡</span> Alumno existente. Se auto-completaron datos y avanzó a {newStudent.semestre}° Semestre (sin duplicar matrícula).
+                  </p>
+                ) : newStudent.matricula.trim() && !searchingMatricula ? (
+                  <p className="text-[10px] font-bold text-gray-400 mt-1 ml-1 leading-tight">
+                    ℹ Estudiante nuevo. Completa sus datos para registrar su matrícula.
+                  </p>
+                ) : null}
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Nombre Completo</label>
+                <input type="text" className="w-full bg-gray-50 border p-4 rounded-xl font-bold text-sm" placeholder="Nombre Completo" value={newStudent.nombre} onChange={e => setNewStudent({ ...newStudent, nombre: e.target.value })} required />
+              </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <select className="flex-1 bg-gray-50 border p-4 rounded-xl font-bold text-sm" value={newStudent.carrera} onChange={e => setNewStudent({ ...newStudent, carrera: e.target.value as Career })} required>
