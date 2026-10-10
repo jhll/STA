@@ -71,6 +71,8 @@ const AdminPanel: React.FC = () => {
   const [assignmentFilters, setAssignmentFilters] = useState({ search: '', career: 'ALL', semester: 'ALL', group: 'ALL' });
   const [modalAssignmentFilters, setModalAssignmentFilters] = useState({ career: '', semester: 'ALL' });
   const [tutorFilters, setTutorFilters] = useState({ search: '', career: 'ALL', semester: 'ALL', group: 'ALL' });
+  const [tutorPage, setTutorPage] = useState(1);
+  const [tutorPageSize, setTutorPageSize] = useState(50);
   const [userFilters, setUserFilters] = useState({ search: '' });
   const [studentTabFilters, setStudentTabFilters] = useState({ search: '', career: 'ALL', semester: 'ALL', group: 'ALL' });
 
@@ -173,6 +175,11 @@ const AdminPanel: React.FC = () => {
       .replace(/[\u0300-\u036f]/g, "")
       .toLowerCase()
       .trim();
+  };
+
+  const normalizeGroup = (group: any): string => {
+    if (!group) return '';
+    return String(group).replace(/[\s\-_]/g, '').toLowerCase().trim();
   };
 
   const getRelation = (data: any) => Array.isArray(data) ? data[0] : data;
@@ -1186,13 +1193,43 @@ const AdminPanel: React.FC = () => {
     return searchMatch && cMatch && semMatch && groupMatch;
   });
 
-  const availableGroupsForTutorsTab = Array.from(new Set([
-    ...tutorias
+  // Tutorías pertenecientes al ciclo seleccionado
+  const cycleTutorias = tutorias.filter((t: any) => {
+    if (selectedCycleId) {
+      if (t.ciclo_id && t.ciclo_id !== selectedCycleId) return false;
+      if (!t.ciclo_id && activeCycleId && selectedCycleId !== activeCycleId) return false;
+    }
+    return true;
+  });
+
+  // Semestres disponibles en las asignaciones de tutoría para la carrera seleccionada (o todas)
+  const availableSemestersForTutorsTab = Array.from(new Set(
+    cycleTutorias
       .filter((t: any) => {
-        if (selectedCycleId) {
-          if (t.ciclo_id && t.ciclo_id !== selectedCycleId) return false;
-          if (!t.ciclo_id && activeCycleId && selectedCycleId !== activeCycleId) return false;
+        const studentRel = getRelation(t.estudiantes);
+        let car = '';
+        if (studentRel) {
+          car = studentRel.carrera || '';
+        } else {
+          const groupMeta = groupsMetadata.find(gm => normalizeGroup(gm.grupo) === normalizeGroup(t.nombre_grupo));
+          car = groupMeta?.carrera || '';
         }
+        if (tutorFilters.career !== 'ALL' && normalizeText(car) !== normalizeText(tutorFilters.career)) return false;
+        const sem = studentRel?.semestre || groupsMetadata.find(gm => normalizeGroup(gm.grupo) === normalizeGroup(t.nombre_grupo))?.semestre || 0;
+        return Number(sem) > 0;
+      })
+      .map((t: any) => {
+        const studentRel = getRelation(t.estudiantes);
+        const sem = studentRel?.semestre || groupsMetadata.find(gm => normalizeGroup(gm.grupo) === normalizeGroup(t.nombre_grupo))?.semestre || 0;
+        return Number(sem);
+      })
+      .filter(Boolean)
+  )).sort((a, b) => a - b);
+
+  // Grupos disponibles ÚNICAMENTE a partir de las tutorías reales del ciclo seleccionado y los filtros activos
+  const availableGroupsForTutorsTab = Array.from(new Set(
+    cycleTutorias
+      .filter((t: any) => {
         const studentRel = getRelation(t.estudiantes);
         let car = '', sem = 0, grp = '';
         if (studentRel) {
@@ -1200,46 +1237,35 @@ const AdminPanel: React.FC = () => {
           sem = studentRel.semestre || 0;
           grp = studentRel.grupo || '';
         } else {
-          const groupMeta = groupsMetadata.find(gm => String(gm.grupo) === String(t.nombre_grupo));
+          const groupMeta = groupsMetadata.find(gm => normalizeGroup(gm.grupo) === normalizeGroup(t.nombre_grupo));
           car = groupMeta?.carrera || '';
           sem = groupMeta?.semestre || 0;
           grp = t.nombre_grupo || '';
         }
-        if (tutorFilters.career !== 'ALL' && !normalizeText(car).includes(normalizeText(tutorFilters.career))) return false;
-        if (tutorFilters.semester !== 'ALL' && sem !== parseInt(tutorFilters.semester)) return false;
+        if (tutorFilters.career !== 'ALL' && normalizeText(car) !== normalizeText(tutorFilters.career)) return false;
+        if (tutorFilters.semester !== 'ALL' && sem !== parseInt(String(tutorFilters.semester), 10)) return false;
         return Boolean(grp);
       })
       .map((t: any) => {
         const studentRel = getRelation(t.estudiantes);
         return String(studentRel?.grupo || t.nombre_grupo || '').trim();
-      }),
-    ...groupsMetadata
-      .filter(gm => {
-        if (tutorFilters.career !== 'ALL' && normalizeText(gm.carrera) !== normalizeText(tutorFilters.career)) return false;
-        if (tutorFilters.semester !== 'ALL' && gm.semestre !== parseInt(tutorFilters.semester)) return false;
-        return Boolean(gm.grupo);
       })
-      .map(gm => String(gm.grupo).trim())
-  ])).filter(Boolean).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+      .filter(Boolean)
+  )).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
 
-  const filteredTutorias = tutorias.filter((t: any) => {
-    if (selectedCycleId) {
-      if (t.ciclo_id && t.ciclo_id !== selectedCycleId) return false;
-      if (!t.ciclo_id && activeCycleId && selectedCycleId !== activeCycleId) return false;
-    }
+  const filteredTutorias = cycleTutorias.filter((t: any) => {
     const tutorName: string = String(getRelation(t.docentes)?.nombre || '');
-    // Handle both new Student relation and legacy Group name
     const studentRel = getRelation(t.estudiantes);
     const assignedName: string = studentRel ? studentRel.nombre : String(t.nombre_grupo || 'Grupo Completo');
+    const studentMatricula: string = String(studentRel?.id || t.estudiante_id || '');
 
-    // For filters, if it's a student, use their data. If group, use metadata.
     let car = '', sem = 0, grp = '';
     if (studentRel) {
       car = studentRel.carrera || '';
       sem = studentRel.semestre || 0;
       grp = String(studentRel.grupo || '').trim();
     } else {
-      const groupMeta = groupsMetadata.find(gm => String(gm.grupo) === String(t.nombre_grupo));
+      const groupMeta = groupsMetadata.find(gm => normalizeGroup(gm.grupo) === normalizeGroup(t.nombre_grupo));
       car = groupMeta?.carrera || '';
       sem = groupMeta?.semestre || 0;
       grp = String(t.nombre_grupo || '').trim();
@@ -1249,14 +1275,38 @@ const AdminPanel: React.FC = () => {
     const searchMatch = !searchTerm ||
       normalizeText(tutorName).includes(normalizeText(searchTerm)) ||
       normalizeText(assignedName).includes(normalizeText(searchTerm)) ||
-      normalizeText(grp).includes(normalizeText(searchTerm));
+      normalizeText(studentMatricula).includes(normalizeText(searchTerm)) ||
+      normalizeGroup(grp).includes(normalizeGroup(searchTerm));
 
-    const careerMatch = tutorFilters.career === 'ALL' || normalizeText(car).includes(normalizeText(tutorFilters.career));
-    const semesterMatch = tutorFilters.semester === 'ALL' || sem === parseInt(String(tutorFilters.semester));
-    const groupMatch = tutorFilters.group === 'ALL' || normalizeText(grp) === normalizeText(tutorFilters.group);
+    const careerMatch = tutorFilters.career === 'ALL' || normalizeText(car) === normalizeText(tutorFilters.career);
+    const semesterMatch = tutorFilters.semester === 'ALL' || sem === parseInt(String(tutorFilters.semester), 10);
+    const groupMatch = tutorFilters.group === 'ALL' || normalizeGroup(grp) === normalizeGroup(tutorFilters.group);
 
     return searchMatch && careerMatch && semesterMatch && groupMatch;
+  }).sort((a: any, b: any) => {
+    const sA = getRelation(a.estudiantes);
+    const sB = getRelation(b.estudiantes);
+    const carA = sA?.carrera || groupsMetadata.find(gm => normalizeGroup(gm.grupo) === normalizeGroup(a.nombre_grupo))?.carrera || '';
+    const carB = sB?.carrera || groupsMetadata.find(gm => normalizeGroup(gm.grupo) === normalizeGroup(b.nombre_grupo))?.carrera || '';
+    if (carA !== carB) return carA.localeCompare(carB);
+
+    const semA = sA?.semestre || groupsMetadata.find(gm => normalizeGroup(gm.grupo) === normalizeGroup(a.nombre_grupo))?.semestre || 0;
+    const semB = sB?.semestre || groupsMetadata.find(gm => normalizeGroup(gm.grupo) === normalizeGroup(b.nombre_grupo))?.semestre || 0;
+    if (semA !== semB) return semA - semB;
+
+    const grpA = sA?.grupo || a.nombre_grupo || '';
+    const grpB = sB?.grupo || b.nombre_grupo || '';
+    if (grpA !== grpB) return grpA.localeCompare(grpB, undefined, { numeric: true, sensitivity: 'base' });
+
+    const nameA = sA?.nombre || a.nombre_grupo || '';
+    const nameB = sB?.nombre || b.nombre_grupo || '';
+    return nameA.localeCompare(nameB);
   });
+
+  const totalTutorPages = tutorPageSize === -1 ? 1 : Math.ceil(filteredTutorias.length / tutorPageSize);
+  const paginatedTutorias = tutorPageSize === -1
+    ? filteredTutorias
+    : filteredTutorias.slice((tutorPage - 1) * tutorPageSize, tutorPage * tutorPageSize);
 
   // Fix for line 524: Use explicit string casting for t properties to satisfy normalizeText(text: string)
   const filteredTeachers = teachers.filter((t: any) => {
@@ -1573,17 +1623,29 @@ const AdminPanel: React.FC = () => {
               {activeTab === 'tutor-assignments' && (
                 <div className="space-y-6 animate-in slide-in-from-bottom-4">
                   <div className="bg-gray-50 p-6 rounded-[2rem] border border-gray-100 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                    <input
-                      type="text"
-                      placeholder="Buscar tutor, estudiante o grupo..."
-                      className="w-full bg-white border border-gray-200 p-4 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500/10"
-                      value={tutorFilters.search}
-                      onChange={e => setTutorFilters({ ...tutorFilters, search: e.target.value })}
-                    />
+                    <div className="relative">
+                      <input
+                        type="text"
+                        placeholder="Buscar tutor, estudiante, matrícula o grupo..."
+                        className="w-full bg-white border border-gray-200 p-4 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500/10"
+                        value={tutorFilters.search}
+                        onChange={e => setTutorFilters({ ...tutorFilters, search: e.target.value })}
+                      />
+                      {tutorFilters.search && (
+                        <button
+                          type="button"
+                          onClick={() => setTutorFilters({ ...tutorFilters, search: '' })}
+                          className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs font-black"
+                          title="Borrar búsqueda"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
                     <select
                       className="bg-white border border-gray-200 p-4 rounded-xl text-xs font-black outline-none appearance-none cursor-pointer focus:ring-2 focus:ring-blue-500/10"
                       value={tutorFilters.career}
-                      onChange={e => setTutorFilters({ ...tutorFilters, career: e.target.value, group: 'ALL' })}
+                      onChange={e => setTutorFilters({ ...tutorFilters, career: e.target.value, semester: 'ALL', group: 'ALL' })}
                     >
                       <option value="ALL">TODOS LOS PROGRAMAS</option>
                       {CAREERS.map(c => <option key={c} value={c}>{c}</option>)}
@@ -1594,49 +1656,89 @@ const AdminPanel: React.FC = () => {
                       onChange={e => setTutorFilters({ ...tutorFilters, semester: e.target.value, group: 'ALL' })}
                     >
                       <option value="ALL">TODOS LOS SEMESTRES</option>
-                      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(s => <option key={s} value={s}>{s}° Semestre</option>)}
+                      {(availableSemestersForTutorsTab.length > 0 ? availableSemestersForTutorsTab : [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]).map(s => (
+                        <option key={`tutor-sem-${s}`} value={s}>{s}° Semestre</option>
+                      ))}
                     </select>
                     <select
                       className="bg-white border border-gray-200 p-4 rounded-xl text-xs font-black outline-none appearance-none cursor-pointer focus:ring-2 focus:ring-blue-500/10"
                       value={tutorFilters.group}
                       onChange={e => setTutorFilters({ ...tutorFilters, group: e.target.value })}
                     >
-                      <option value="ALL">TODOS LOS GRUPOS</option>
+                      <option value="ALL">TODOS LOS GRUPOS ({availableGroupsForTutorsTab.length})</option>
                       {availableGroupsForTutorsTab.map((g, idx) => (
                         <option key={`tutor-group-${g}-${idx}`} value={g}>Grupo {g}</option>
                       ))}
                     </select>
                   </div>
 
-                  {/* Resumen de filtros aplicados */}
-                  <div className="flex flex-wrap items-center justify-between gap-2 px-2 text-xs">
+                  {/* Resumen de filtros aplicados y contadores */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 px-2 text-xs">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-gray-500 font-bold">
-                        Mostrando <strong className="text-[#003B5C] font-black">{filteredTutorias.length}</strong> {filteredTutorias.length === 1 ? 'asignación' : 'asignaciones'} de tutoría
+                        Mostrando <strong className="text-[#003B5C] font-black">{filteredTutorias.length}</strong> de <strong className="text-gray-700 font-black">{cycleTutorias.length}</strong> asignaciones
                       </span>
                       {tutorFilters.career !== 'ALL' && (
-                        <span className="bg-blue-50 text-[#003B5C] border border-blue-100 px-2.5 py-0.5 rounded-md font-black text-[10px]">
-                          {tutorFilters.career}
+                        <span className="bg-blue-50 text-[#003B5C] border border-blue-200 px-2.5 py-0.5 rounded-md font-black text-[10px] inline-flex items-center gap-1.5">
+                          <span>{tutorFilters.career}</span>
+                          <button
+                            type="button"
+                            onClick={() => setTutorFilters({ ...tutorFilters, career: 'ALL', semester: 'ALL', group: 'ALL' })}
+                            className="text-blue-400 hover:text-blue-800 font-bold text-xs"
+                            title="Quitar filtro de programa"
+                          >
+                            ✕
+                          </button>
                         </span>
                       )}
                       {tutorFilters.semester !== 'ALL' && (
-                        <span className="bg-blue-50 text-[#003B5C] border border-blue-100 px-2.5 py-0.5 rounded-md font-black text-[10px]">
-                          {tutorFilters.semester}° Semestre
+                        <span className="bg-blue-50 text-[#003B5C] border border-blue-200 px-2.5 py-0.5 rounded-md font-black text-[10px] inline-flex items-center gap-1.5">
+                          <span>{tutorFilters.semester}° Semestre</span>
+                          <button
+                            type="button"
+                            onClick={() => setTutorFilters({ ...tutorFilters, semester: 'ALL', group: 'ALL' })}
+                            className="text-blue-400 hover:text-blue-800 font-bold text-xs"
+                            title="Quitar filtro de semestre"
+                          >
+                            ✕
+                          </button>
                         </span>
                       )}
                       {tutorFilters.group !== 'ALL' && (
-                        <span className="bg-amber-50 text-amber-800 border border-amber-200 px-2.5 py-0.5 rounded-md font-black text-[10px]">
-                          Grupo {tutorFilters.group}
+                        <span className="bg-amber-50 text-amber-900 border border-amber-200 px-2.5 py-0.5 rounded-md font-black text-[10px] inline-flex items-center gap-1.5">
+                          <span>Grupo {tutorFilters.group}</span>
+                          <button
+                            type="button"
+                            onClick={() => setTutorFilters({ ...tutorFilters, group: 'ALL' })}
+                            className="text-amber-500 hover:text-amber-800 font-bold text-xs"
+                            title="Quitar filtro de grupo"
+                          >
+                            ✕
+                          </button>
+                        </span>
+                      )}
+                      {tutorFilters.search && (
+                        <span className="bg-gray-100 text-gray-700 border border-gray-200 px-2.5 py-0.5 rounded-md font-black text-[10px] inline-flex items-center gap-1.5">
+                          <span>Búsqueda: "{tutorFilters.search}"</span>
+                          <button
+                            type="button"
+                            onClick={() => setTutorFilters({ ...tutorFilters, search: '' })}
+                            className="text-gray-400 hover:text-gray-800 font-bold text-xs"
+                            title="Borrar texto de búsqueda"
+                          >
+                            ✕
+                          </button>
                         </span>
                       )}
                     </div>
+
                     {(tutorFilters.search || tutorFilters.career !== 'ALL' || tutorFilters.semester !== 'ALL' || tutorFilters.group !== 'ALL') && (
                       <button
                         type="button"
                         onClick={() => setTutorFilters({ search: '', career: 'ALL', semester: 'ALL', group: 'ALL' })}
-                        className="text-[10px] font-black text-blue-600 hover:text-blue-800 uppercase tracking-widest hover:underline"
+                        className="text-[10px] font-black text-red-600 hover:text-red-800 uppercase tracking-widest hover:underline flex items-center gap-1"
                       >
-                        ✕ Limpiar Filtros
+                        ✕ Limpiar Todos los Filtros
                       </button>
                     )}
                   </div>
@@ -1655,16 +1757,16 @@ const AdminPanel: React.FC = () => {
                       </thead>
                       <tbody className="divide-y divide-gray-100">
                         {filteredTutorias.length === 0 ? (
-                          <tr><td colSpan={6} className="py-20 text-center text-gray-300 font-black uppercase text-[10px]">Sin tutores asignados con los filtros aplicados</td></tr>
-                        ) : filteredTutorias.map(t => {
+                          <tr><td colSpan={6} className="py-20 text-center text-gray-400 font-black uppercase text-xs">Sin tutores asignados con los filtros aplicados</td></tr>
+                        ) : paginatedTutorias.map(t => {
                           const studentRel = getRelation(t.estudiantes);
                           const resolvedGroup = studentRel?.grupo || t.nombre_grupo || '---';
-                          const resolvedCareer = studentRel?.carrera || groupsMetadata.find(gm => gm.grupo === t.nombre_grupo)?.carrera || '---';
-                          const resolvedSemester = studentRel?.semestre || groupsMetadata.find(gm => gm.grupo === t.nombre_grupo)?.semestre;
+                          const resolvedCareer = studentRel?.carrera || groupsMetadata.find(gm => normalizeGroup(gm.grupo) === normalizeGroup(t.nombre_grupo))?.carrera || '---';
+                          const resolvedSemester = studentRel?.semestre || groupsMetadata.find(gm => normalizeGroup(gm.grupo) === normalizeGroup(t.nombre_grupo))?.semestre;
 
                           return (
                             <tr key={t.id} className="hover:bg-blue-50/20 text-[12px] group transition-all">
-                              <td className="px-8 py-5 font-bold text-gray-900">{getRelation(t.docentes)?.nombre}</td>
+                              <td className="px-8 py-5 font-bold text-gray-900">{getRelation(t.docentes)?.nombre || 'Sin Asignar'}</td>
                               <td className="px-8 py-5">
                                 {studentRel ? (
                                   <div className="flex flex-col">
@@ -1700,6 +1802,57 @@ const AdminPanel: React.FC = () => {
                       </tbody>
                     </table>
                   </div>
+
+                  {/* Barra de Paginación */}
+                  {filteredTutorias.length > 0 && (
+                    <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 bg-gray-50 rounded-2xl border border-gray-100 text-xs">
+                      <div className="flex items-center gap-3">
+                        <span className="text-gray-500 font-bold">Filas por página:</span>
+                        <select
+                          value={tutorPageSize}
+                          onChange={e => {
+                            setTutorPageSize(parseInt(e.target.value, 10));
+                            setTutorPage(1);
+                          }}
+                          className="bg-white border border-gray-200 px-3 py-1.5 rounded-xl font-black text-[#003B5C] outline-none cursor-pointer"
+                        >
+                          <option value={25}>25</option>
+                          <option value={50}>50</option>
+                          <option value={100}>100</option>
+                          <option value={-1}>Todas ({filteredTutorias.length})</option>
+                        </select>
+                        <span className="text-gray-400 text-[11px] font-semibold">
+                          {tutorPageSize === -1
+                            ? `Mostrando todas las ${filteredTutorias.length} filas`
+                            : `Mostrando ${Math.min((tutorPage - 1) * tutorPageSize + 1, filteredTutorias.length)} - ${Math.min(tutorPage * tutorPageSize, filteredTutorias.length)} de ${filteredTutorias.length}`}
+                        </span>
+                      </div>
+
+                      {tutorPageSize !== -1 && totalTutorPages > 1 && (
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            disabled={tutorPage === 1}
+                            onClick={() => setTutorPage(p => Math.max(1, p - 1))}
+                            className="px-3.5 py-1.5 rounded-xl border border-gray-200 bg-white font-black text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                          >
+                            ← Anterior
+                          </button>
+                          <span className="px-3 py-1 font-black text-[#003B5C]">
+                            Pág. {tutorPage} de {totalTutorPages}
+                          </span>
+                          <button
+                            type="button"
+                            disabled={tutorPage >= totalTutorPages}
+                            onClick={() => setTutorPage(p => Math.min(totalTutorPages, p + 1))}
+                            className="px-3.5 py-1.5 rounded-xl border border-gray-200 bg-white font-black text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                          >
+                            Siguiente →
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
