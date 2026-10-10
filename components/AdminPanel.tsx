@@ -2,7 +2,7 @@
 
 
 import React, { useState, useEffect } from 'react';
-import { CAREERS } from '../constants';
+import { CAREERS, SPECIALTY_SEMESTERS, isSpecialtySemester, DEFAULT_SPECIALTY_CATALOG } from '../constants';
 import { supabase } from '../services/supabaseClient';
 import { UserRole, CicloEscolar, Subject, Student, Career } from '../types';
 import StudentProfile from './StudentProfile';
@@ -19,6 +19,22 @@ const AdminPanel: React.FC = () => {
   const [showTutorModal, setShowTutorModal] = useState(false);
   const [showUserModal, setShowUserModal] = useState(false);
   const [showCycleModal, setShowCycleModal] = useState(false);
+  const [showAccentuationGeneratorModal, setShowAccentuationGeneratorModal] = useState(false);
+
+  // Estados del generador de acentuaciones / optativas
+  const [generatorCareer, setGeneratorCareer] = useState<string>('ALL');
+  const [generatorSemester, setGeneratorSemester] = useState<string>('ALL');
+  const [syncWithOfficialSubjects, setSyncWithOfficialSubjects] = useState(true);
+  const [isGeneratingCatalog, setIsGeneratingCatalog] = useState(false);
+  const [customAccentuation, setCustomAccentuation] = useState({
+    nombre: '',
+    carrera: Career.QFB,
+    semestre: 7,
+    tipo_optativa: 'OL I',
+    codigo: '',
+    creditos: 10,
+    crearMateria: true
+  });
 
   const [isSaving, setIsSaving] = useState(false);
   const [isEditingSubject, setIsEditingSubject] = useState(false);
@@ -52,7 +68,7 @@ const AdminPanel: React.FC = () => {
 
   // Filtros
   const [subjectFilters, setSubjectFilters] = useState({ search: '', career: 'ALL', semester: 'ALL' });
-  const [assignmentFilters, setAssignmentFilters] = useState({ search: '', career: 'ALL', semester: 'ALL' });
+  const [assignmentFilters, setAssignmentFilters] = useState({ search: '', career: 'ALL', semester: 'ALL', group: 'ALL' });
   const [modalAssignmentFilters, setModalAssignmentFilters] = useState({ career: '', semester: 'ALL' });
   const [tutorFilters, setTutorFilters] = useState({ search: '', career: 'ALL', semester: 'ALL' });
   const [userFilters, setUserFilters] = useState({ search: '' });
@@ -83,6 +99,30 @@ const AdminPanel: React.FC = () => {
 
   const [searchingMatricula, setSearchingMatricula] = useState(false);
   const [foundExistingStudent, setFoundExistingStudent] = useState<any | null>(null);
+
+  // Estados para revisión y corrección de alumnos repetidos por matrícula
+  const [showDuplicatesModal, setShowDuplicatesModal] = useState(false);
+  const [isCheckingDuplicates, setIsCheckingDuplicates] = useState(false);
+  const [isFixingDuplicates, setIsFixingDuplicates] = useState(false);
+  const [duplicatesReport, setDuplicatesReport] = useState<{
+    totalScanned: number;
+    matriculaDuplicates: {
+      matricula: string;
+      students: any[];
+      masterStudent: any;
+    }[];
+    historialDuplicates: {
+      estudiante_id: string;
+      ciclo_id: string;
+      records: any[];
+    }[];
+    nameDuplicates: {
+      name: string;
+      students: any[];
+    }[];
+    whitespaceIssues: any[];
+  } | null>(null);
+  const [activeDuplicateTab, setActiveDuplicateTab] = useState<'matricula' | 'historial' | 'names'>('matricula');
 
   const handleSearchMatricula = async (matriculaToSearch: string) => {
     const cleanId = matriculaToSearch.trim();
@@ -410,12 +450,15 @@ const AdminPanel: React.FC = () => {
           finalMateriaId = existingSub.id;
         } else {
           // 2. If not, create it on the fly
+          const targetSem = parseInt(modalAssignmentFilters.semester) || 8;
           const { data: newSub, error } = await supabase.from('materias').insert({
             codigo: 'OPT-ACENT', // Generic code for internal tracking
             nombre: accName,
             carrera: modalAssignmentFilters.career, // Context career
-            semestre: 8,
-            creditos: 10 // Standard credits
+            semestre: targetSem,
+            creditos: 10, // Standard credits
+            tipo: 'Optativa Libre',
+            es_optativa: true
           }).select().single();
 
           if (error) throw error;
@@ -445,6 +488,121 @@ const AdminPanel: React.FC = () => {
       setShowSubjectModal(false);
       fetchData();
     } catch (err: any) { alert(err.message); } finally { setIsSaving(false); }
+  };
+
+  const handleGenerateDefaultCatalog = async () => {
+    setIsGeneratingCatalog(true);
+    try {
+      const itemsToProcess = DEFAULT_SPECIALTY_CATALOG.filter(item => {
+        const cMatch = generatorCareer === 'ALL' || item.carrera === generatorCareer;
+        const sMatch = generatorSemester === 'ALL' || item.semestre === parseInt(generatorSemester);
+        return cMatch && sMatch;
+      });
+
+      if (itemsToProcess.length === 0) {
+        alert("No hay elementos para generar con los filtros seleccionados.");
+        setIsGeneratingCatalog(false);
+        return;
+      }
+
+      let accCreated = 0;
+      let matCreated = 0;
+
+      for (const item of itemsToProcess) {
+        const existsAcc = accentuations.find(a => 
+          normalizeText(a.nombre) === normalizeText(item.nombre) && 
+          normalizeText(a.carrera) === normalizeText(item.carrera)
+        );
+
+        if (!existsAcc) {
+          const { error: accErr } = await supabase.from('acentuaciones').insert({
+            nombre: item.nombre.trim().toUpperCase(),
+            carrera: item.carrera,
+            tipo_optativa: item.tipo_optativa,
+            semestre: item.semestre
+          });
+          if (!accErr) accCreated++;
+        }
+
+        if (syncWithOfficialSubjects) {
+          const existsMat = subjects.find(s => 
+            normalizeText(s.nombre) === normalizeText(item.nombre) && 
+            normalizeText(s.carrera) === normalizeText(item.carrera)
+          );
+          if (!existsMat) {
+            const { error: matErr } = await supabase.from('materias').insert({
+              codigo: item.codigo,
+              nombre: item.nombre.trim().toUpperCase(),
+              carrera: item.carrera,
+              semestre: item.semestre,
+              creditos: item.creditos || 10,
+              tipo: item.tipo_optativa.startsWith('OL') ? 'Optativa Libre' : 'Acentuación',
+              es_optativa: true
+            });
+            if (!matErr) matCreated++;
+          }
+        }
+      }
+
+      alert(`✅ Proceso completado exitosamente:\n- ${accCreated} temas de acentuación registrados en el catálogo.\n- ${matCreated} materias de optativa libre sincronizadas en el plan de estudios.`);
+      await fetchData();
+    } catch (err: any) {
+      alert("Error al generar catálogo: " + (err.message || err));
+    } finally {
+      setIsGeneratingCatalog(false);
+    }
+  };
+
+  const handleSaveCustomAccentuation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!customAccentuation.nombre.trim()) {
+      alert("Por favor ingrese el nombre del tema o materia.");
+      return;
+    }
+    setIsGeneratingCatalog(true);
+    try {
+      const cleanName = customAccentuation.nombre.trim().toUpperCase();
+      const { error: accErr } = await supabase.from('acentuaciones').insert({
+        nombre: cleanName,
+        carrera: customAccentuation.carrera,
+        tipo_optativa: customAccentuation.tipo_optativa,
+        semestre: customAccentuation.semestre
+      });
+
+      if (accErr) throw accErr;
+
+      if (customAccentuation.crearMateria) {
+        const autoCode = customAccentuation.codigo.trim() || `OPT-${customAccentuation.carrera.slice(0, 3).toUpperCase()}-${customAccentuation.semestre}01`;
+        await supabase.from('materias').insert({
+          codigo: autoCode,
+          nombre: cleanName,
+          carrera: customAccentuation.carrera,
+          semestre: customAccentuation.semestre,
+          creditos: customAccentuation.creditos,
+          tipo: customAccentuation.tipo_optativa.startsWith('OL') ? 'Optativa Libre' : 'Acentuación',
+          es_optativa: true
+        });
+      }
+
+      alert(`✅ Tema "${cleanName}" creado correctamente para ${customAccentuation.carrera} (${customAccentuation.semestre}° Semestre).`);
+      setCustomAccentuation(prev => ({ ...prev, nombre: '', codigo: '' }));
+      await fetchData();
+    } catch (err: any) {
+      alert("Error al crear tema: " + (err.message || err));
+    } finally {
+      setIsGeneratingCatalog(false);
+    }
+  };
+
+  const handleDeleteAccentuation = async (id: string, name: string) => {
+    if (!confirm(`¿Eliminar la acentuación "${name}"?`)) return;
+    try {
+      const { error } = await supabase.from('acentuaciones').delete().eq('id', id);
+      if (error) throw error;
+      await fetchData();
+    } catch (err: any) {
+      alert(err.message);
+    }
   };
 
   // Fetch students for modal when filters change
@@ -650,6 +808,288 @@ const AdminPanel: React.FC = () => {
     }
   };
 
+  // Función para auditar y revisar alumnos repetidos usando el campo matrícula como referencia
+  const handleReviewAndFixDuplicates = async () => {
+    setIsCheckingDuplicates(true);
+    try {
+      // 1. Obtener todos los estudiantes paginados para no truncar a 1000 registros
+      let allStudents: any[] = [];
+      let page = 0;
+      const pageSize = 1000;
+      let hasMore = true;
+
+      while (hasMore) {
+        const { data, error } = await supabase
+          .from('estudiantes')
+          .select('*')
+          .range(page * pageSize, (page + 1) * pageSize - 1);
+
+        if (error) throw error;
+        if (!data || data.length === 0) {
+          hasMore = false;
+        } else {
+          allStudents = [...allStudents, ...data];
+          if (data.length < pageSize) hasMore = false;
+          page++;
+        }
+      }
+
+      // 2. Obtener todo el historial de estudiantes por ciclo
+      let allHistorial: any[] = [];
+      page = 0;
+      hasMore = true;
+      while (hasMore) {
+        const { data, error } = await supabase
+          .from('historial_estudiantes_ciclo')
+          .select('*')
+          .range(page * pageSize, (page + 1) * pageSize - 1);
+
+        if (error) {
+          console.warn('Aviso al consultar historial_estudiantes_ciclo:', error);
+          hasMore = false;
+        } else if (!data || data.length === 0) {
+          hasMore = false;
+        } else {
+          allHistorial = [...allHistorial, ...data];
+          if (data.length < pageSize) hasMore = false;
+          page++;
+        }
+      }
+
+      // 3. Analizar duplicados utilizando la matrícula como referencia clave
+      const matriculaGroups = new Map<string, any[]>();
+      const whitespaceList: any[] = [];
+
+      allStudents.forEach(s => {
+        const rawId = (s.id || '').toString();
+        const trimmed = rawId.trim();
+        if (rawId !== trimmed) {
+          whitespaceList.push(s);
+        }
+        // Matrícula normalizada en mayúsculas sin espacios redundantes
+        const key = trimmed.toUpperCase();
+        if (!matriculaGroups.has(key)) {
+          matriculaGroups.set(key, [s]);
+        } else {
+          matriculaGroups.get(key)!.push(s);
+        }
+      });
+
+      // Identificar grupos con más de un registro por matrícula
+      const matriculaDuplicates: any[] = [];
+      matriculaGroups.forEach((list, key) => {
+        if (list.length > 1) {
+          // Seleccionar el registro maestro prioritario (con ciclo activo, mayor promedio o más reciente)
+          const sorted = [...list].sort((a, b) => {
+            const aScore = (a.ciclo_id ? 10 : 0) + (Number(a.promedio_acumulado) > 0 ? 5 : 0) + (Number(a.porcentaje_asistencia) > 0 ? 5 : 0);
+            const bScore = (b.ciclo_id ? 10 : 0) + (Number(b.promedio_acumulado) > 0 ? 5 : 0) + (Number(b.porcentaje_asistencia) > 0 ? 5 : 0);
+            if (bScore !== aScore) return bScore - aScore;
+            return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+          });
+          matriculaDuplicates.push({
+            matricula: key,
+            students: list,
+            masterStudent: sorted[0]
+          });
+        }
+      });
+
+      // 4. Analizar duplicados en historial de ciclo por (estudiante_id, ciclo_id)
+      const histGroups = new Map<string, any[]>();
+      allHistorial.forEach(h => {
+        const key = `${(h.estudiante_id || '').toString().trim().toUpperCase()}_${h.ciclo_id}`;
+        if (!histGroups.has(key)) {
+          histGroups.set(key, [h]);
+        } else {
+          histGroups.get(key)!.push(h);
+        }
+      });
+      const historialDuplicates: any[] = [];
+      histGroups.forEach((records) => {
+        if (records.length > 1) {
+          historialDuplicates.push({
+            estudiante_id: records[0].estudiante_id,
+            ciclo_id: records[0].ciclo_id,
+            records
+          });
+        }
+      });
+
+      // 5. Analizar alumnos con el mismo nombre pero diferente matrícula
+      const nameGroups = new Map<string, any[]>();
+      allStudents.forEach(s => {
+        const cleanName = (s.nombre || '').toString().trim().toUpperCase();
+        if (cleanName) {
+          if (!nameGroups.has(cleanName)) {
+            nameGroups.set(cleanName, [s]);
+          } else {
+            nameGroups.get(cleanName)!.push(s);
+          }
+        }
+      });
+      const nameDuplicates: any[] = [];
+      nameGroups.forEach((list, name) => {
+        const distinctMatriculas = new Set(list.map(x => (x.id || '').toString().trim().toUpperCase()));
+        if (distinctMatriculas.size > 1) {
+          nameDuplicates.push({
+            name,
+            students: list
+          });
+        }
+      });
+
+      setDuplicatesReport({
+        totalScanned: allStudents.length,
+        matriculaDuplicates,
+        historialDuplicates,
+        nameDuplicates,
+        whitespaceIssues: whitespaceList
+      });
+      setShowDuplicatesModal(true);
+    } catch (err: any) {
+      console.error('Error al auditar duplicados:', err);
+      alert('❌ Error al revisar la base de datos: ' + (err.message || err));
+    } finally {
+      setIsCheckingDuplicates(false);
+    }
+  };
+
+  // Función para ejecutar la corrección automática de duplicados por matrícula
+  const executeFixDuplicates = async () => {
+    if (!duplicatesReport) return;
+    const totalMatriculaDupes = duplicatesReport.matriculaDuplicates.length;
+    const totalHistDupes = duplicatesReport.historialDuplicates.length;
+    const totalWhitespace = duplicatesReport.whitespaceIssues.length;
+
+    if (totalMatriculaDupes === 0 && totalHistDupes === 0 && totalWhitespace === 0) {
+      alert('ℹ️ No existen registros repetidos por matrícula que requieran corrección.');
+      return;
+    }
+
+    const confirmMsg = `¿Deseas proceder a corregir y unificar los registros duplicados?\n\n- ${totalMatriculaDupes} matrículas con registros repetidos en estudiantes.\n- ${totalHistDupes} entradas duplicadas en el historial de ciclo.\n- ${totalWhitespace} matrículas con espacios a normalizar.\n\nSe conservará el registro principal y se sincronizarán calificaciones, asistencias y asignaciones.`;
+    if (!window.confirm(confirmMsg)) return;
+
+    setIsFixingDuplicates(true);
+    try {
+      let correctedCount = 0;
+      let cleanedHistCount = 0;
+
+      // 1. Corregir registros repetidos en la tabla estudiantes
+      for (const item of duplicatesReport.matriculaDuplicates) {
+        const master = item.masterStudent;
+        const secondaries = item.students.filter(s => s.id !== master.id);
+
+        for (const sec of secondaries) {
+          // Re-asociar historial
+          try {
+            await supabase.from('historial_estudiantes_ciclo').update({ estudiante_id: master.id }).eq('estudiante_id', sec.id);
+          } catch (e) {
+            await supabase.from('historial_estudiantes_ciclo').delete().eq('estudiante_id', sec.id);
+          }
+          // Re-asociar calificaciones
+          try {
+            await supabase.from('calificaciones').update({ estudiante_id: master.id }).eq('estudiante_id', sec.id);
+          } catch (e) {
+            await supabase.from('calificaciones').delete().eq('estudiante_id', sec.id);
+          }
+          // Re-asociar asistencias
+          try {
+            await supabase.from('asistencias').update({ estudiante_id: master.id }).eq('estudiante_id', sec.id);
+          } catch (e) {
+            await supabase.from('asistencias').delete().eq('estudiante_id', sec.id);
+          }
+          // Re-asociar tutorías
+          try {
+            await supabase.from('tutorias').update({ estudiante_id: master.id }).eq('estudiante_id', sec.id);
+          } catch (e) {
+            await supabase.from('tutorias').delete().eq('estudiante_id', sec.id);
+          }
+          // Re-asociar intervenciones
+          try {
+            await supabase.from('intervenciones').update({ estudiante_id: master.id }).eq('estudiante_id', sec.id);
+          } catch (e) {
+            console.warn(e);
+          }
+
+          // Eliminar el registro duplicado de estudiantes
+          await supabase.from('estudiantes').delete().eq('id', sec.id);
+        }
+        correctedCount++;
+      }
+
+      // 2. Depurar duplicados en historial_estudiantes_ciclo
+      for (const item of duplicatesReport.historialDuplicates) {
+        const toDelete = item.records.slice(1);
+        for (const rec of toDelete) {
+          await supabase.from('historial_estudiantes_ciclo').delete().eq('id', rec.id);
+          cleanedHistCount++;
+        }
+      }
+
+      // 3. Limpiar espacios en blanco en IDs
+      for (const ws of duplicatesReport.whitespaceIssues) {
+        const cleanId = (ws.id || '').trim();
+        if (cleanId && cleanId !== ws.id) {
+          await supabase.from('estudiantes').update({ id: cleanId }).eq('id', ws.id);
+        }
+      }
+
+      alert(`✅ Corrección completada con éxito:\n\n- ${correctedCount} matrículas unificadas.\n- ${cleanedHistCount} entradas duplicadas eliminadas del historial.\n- Datos académicos y asignaciones preservados.`);
+      setShowDuplicatesModal(false);
+      fetchData();
+    } catch (err: any) {
+      console.error('Error durante la corrección:', err);
+      alert('❌ Ocurrió un error al corregir registros: ' + (err.message || err));
+    } finally {
+      setIsFixingDuplicates(false);
+    }
+  };
+
+  // Función para unificar alumnos que tienen el mismo nombre pero matrículas distintas
+  const handleMergeStudentsByName = async (targetMatricula: string, oldMatricula: string, studentName: string) => {
+    if (!window.confirm(`¿Seguro que deseas unificar el registro de ${studentName}?\n\nSe migrarán las calificaciones, asistencias, tutorías e historial de la matrícula ${oldMatricula} hacia ${targetMatricula}, y luego se eliminará la matrícula obsoleta.`)) {
+      return;
+    }
+    setIsFixingDuplicates(true);
+    try {
+      try {
+        await supabase.from('historial_estudiantes_ciclo').update({ estudiante_id: targetMatricula }).eq('estudiante_id', oldMatricula);
+      } catch (e) {
+        await supabase.from('historial_estudiantes_ciclo').delete().eq('estudiante_id', oldMatricula);
+      }
+      try {
+        await supabase.from('calificaciones').update({ estudiante_id: targetMatricula }).eq('estudiante_id', oldMatricula);
+      } catch (e) {
+        await supabase.from('calificaciones').delete().eq('estudiante_id', oldMatricula);
+      }
+      try {
+        await supabase.from('asistencias').update({ estudiante_id: targetMatricula }).eq('estudiante_id', oldMatricula);
+      } catch (e) {
+        await supabase.from('asistencias').delete().eq('estudiante_id', oldMatricula);
+      }
+      try {
+        await supabase.from('tutorias').update({ estudiante_id: targetMatricula }).eq('estudiante_id', oldMatricula);
+      } catch (e) {
+        await supabase.from('tutorias').delete().eq('estudiante_id', oldMatricula);
+      }
+      try {
+        await supabase.from('intervenciones').update({ estudiante_id: targetMatricula }).eq('estudiante_id', oldMatricula);
+      } catch (e) {
+        console.warn(e);
+      }
+      await supabase.from('estudiantes').delete().eq('id', oldMatricula);
+
+      alert(`✅ Registros de ${studentName} unificados con éxito a la matrícula ${targetMatricula}.`);
+      handleReviewAndFixDuplicates();
+      fetchData();
+    } catch (err: any) {
+      console.error('Error al unificar por nombre:', err);
+      alert('❌ Error al unificar registros: ' + (err.message || err));
+    } finally {
+      setIsFixingDuplicates(false);
+    }
+  };
+
   const handleDeleteTutoria = async (id: string) => {
     if (!confirm("¿Desea eliminar esta tutoría?")) return;
     await supabase.from('tutorias').delete().eq('id', id);
@@ -704,6 +1144,28 @@ const AdminPanel: React.FC = () => {
       .map(s => s.carrera)
   )).sort();
 
+  const availableGroupsForAssignments = Array.from(new Set([
+    ...groups
+      .filter((g: any) => {
+        if (selectedCycleId) {
+          if (g.ciclo_id && g.ciclo_id !== selectedCycleId) return false;
+          if (!g.ciclo_id && activeCycleId && selectedCycleId !== activeCycleId) return false;
+        }
+        const mat = getRelation(g.materias);
+        if (assignmentFilters.career !== 'ALL' && !normalizeText(mat?.carrera).includes(normalizeText(assignmentFilters.career))) return false;
+        if (assignmentFilters.semester !== 'ALL' && mat?.semestre !== parseInt(assignmentFilters.semester)) return false;
+        return Boolean(g.nombre_grupo);
+      })
+      .map((g: any) => String(g.nombre_grupo).trim()),
+    ...groupsMetadata
+      .filter(gm => {
+        if (assignmentFilters.career !== 'ALL' && normalizeText(gm.carrera) !== normalizeText(assignmentFilters.career)) return false;
+        if (assignmentFilters.semester !== 'ALL' && gm.semestre !== parseInt(assignmentFilters.semester)) return false;
+        return Boolean(gm.grupo);
+      })
+      .map(gm => String(gm.grupo).trim())
+  ])).filter(Boolean).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+
   const filteredGroups = groups.filter(g => {
     if (selectedCycleId) {
       if (g.ciclo_id && g.ciclo_id !== selectedCycleId) return false;
@@ -715,11 +1177,13 @@ const AdminPanel: React.FC = () => {
     // Explicitly casting mat and doc properties to string to avoid unknown type errors in normalizeText.
     const searchMatch = !assignmentFilters.search ||
       normalizeText(mat?.nombre).includes(normalizeText(assignmentFilters.search)) ||
-      normalizeText(doc?.nombre).includes(normalizeText(assignmentFilters.search));
+      normalizeText(doc?.nombre).includes(normalizeText(assignmentFilters.search)) ||
+      normalizeText(g.nombre_grupo).includes(normalizeText(assignmentFilters.search));
     const cMatch = assignmentFilters.career === 'ALL' || normalizeText(mat?.carrera).includes(normalizeText(assignmentFilters.career));
     const semMatch = assignmentFilters.semester === 'ALL' || mat?.semestre === parseInt(assignmentFilters.semester);
+    const groupMatch = assignmentFilters.group === 'ALL' || normalizeText(g.nombre_grupo) === normalizeText(assignmentFilters.group);
 
-    return searchMatch && cMatch && semMatch;
+    return searchMatch && cMatch && semMatch && groupMatch;
   });
 
   const filteredTutorias = tutorias.filter((t: any) => {
@@ -797,14 +1261,15 @@ const AdminPanel: React.FC = () => {
       return cMatch && semMatch;
     });
 
-    // 2. If 8th Semester, inject Accentuations as virtual groups (SUB-...)
-    if (modalAssignmentFilters.semester === '8' && modalAssignmentFilters.career) {
+    // 2. If 7th, 8th or 9th Semester, inject Accentuations as virtual groups (SUB-...)
+    const semInt = parseInt(modalAssignmentFilters.semester);
+    if ([7, 8, 9].includes(semInt) && modalAssignmentFilters.career) {
       const careerAccentuations = accentuations
-        .filter((a: any) => normalizeText(a.carrera) === normalizeText(modalAssignmentFilters.career))
+        .filter((a: any) => normalizeText(a.carrera) === normalizeText(modalAssignmentFilters.career) && (Number(a.semestre) === semInt || (!a.semestre && semInt === 8)))
         .map((a: any) => ({
           grupo: `SUB - ${a.nombre}`,
           carrera: a.carrera,
-          semestre: 8,
+          semestre: semInt,
           turno: 'Variable'
         }));
       return [...base, ...careerAccentuations];
@@ -820,16 +1285,17 @@ const AdminPanel: React.FC = () => {
       return cMatch && semMatch;
     });
 
-    // 2. If 8th Semester, inject Accentuations as virtual Subjects
-    if (modalAssignmentFilters.semester === '8' && modalAssignmentFilters.career) {
+    // 2. If 7th, 8th or 9th Semester, inject Accentuations as virtual Subjects
+    const semInt = parseInt(modalAssignmentFilters.semester);
+    if ([7, 8, 9].includes(semInt) && modalAssignmentFilters.career) {
       const asSubjects = accentuations
-        .filter((a: any) => normalizeText(a.carrera) === normalizeText(modalAssignmentFilters.career))
+        .filter((a: any) => normalizeText(a.carrera) === normalizeText(modalAssignmentFilters.career) && (Number(a.semestre) === semInt || (!a.semestre && semInt === 8)))
         .map((a: any) => ({
           id: `ACC:${a.id}`, // Custom prefix ID
-          codigo: a.tipo_optativa,
+          codigo: a.tipo_optativa || 'OPT',
           nombre: a.nombre,
           carrera: a.carrera,
-          semestre: 8,
+          semestre: semInt,
           creditos: 10
         } as Subject));
       return [...filtered, ...asSubjects];
@@ -872,11 +1338,36 @@ const AdminPanel: React.FC = () => {
           <div className="flex flex-wrap justify-center gap-3">
             {activeTab === 'users' && <button onClick={() => { setIsEditingUser(false); setNewUser({ numero_empleado: '', nombre: '', email: '', password: '', rol: [UserRole.DOCENTE] }); setShowUserModal(true); }} className="bg-[#FFD100] text-[#003B5C] px-8 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl hover:scale-105 transition-all">+ Nuevo Personal</button>}
             {activeTab === 'ciclos' && <button onClick={() => setShowCycleModal(true)} className="bg-[#FFD100] text-[#003B5C] px-8 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl hover:scale-105 transition-all">+ Nuevo Ciclo</button>}
-            {activeTab === 'subjects' && <button onClick={() => { setIsEditingSubject(false); setNewSubject({ codigo: '', nombre: '', carrera: Career.QFB, semestre: 1, creditos: 5 }); setShowSubjectModal(true); }} className="bg-[#FFD100] text-[#003B5C] px-8 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl hover:scale-105 transition-all">+ Nueva Materia</button>}
+            {activeTab === 'subjects' && (
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => setShowAccentuationGeneratorModal(true)}
+                  className="bg-[#003B5C] text-[#FFD100] border-2 border-[#FFD100] px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl hover:bg-[#FFD100] hover:text-[#003B5C] transition-all flex items-center gap-2"
+                >
+                  <span className="text-sm">⚡</span> Generar Acentuaciones y Optativas (7°, 8°, 9°)
+                </button>
+                <button
+                  onClick={() => { setIsEditingSubject(false); setNewSubject({ codigo: '', nombre: '', carrera: Career.QFB, semestre: 1, creditos: 5 }); setShowSubjectModal(true); }}
+                  className="bg-[#FFD100] text-[#003B5C] px-8 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl hover:scale-105 transition-all"
+                >
+                  + Nueva Materia
+                </button>
+              </div>
+            )}
             {activeTab === 'assignments' && <button onClick={() => { setIsEditingGroup(false); setNewGroup({ nombre_grupo: '', materia_id: '', docente_id: '', turno: 'Matutino', ciclo_id: activeCycleId || '' }); setShowGroupModal(true); }} className="bg-[#FFD100] text-[#003B5C] px-8 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl hover:scale-105 transition-all">+ Nueva Asignación</button>}
             {activeTab === 'tutor-assignments' && <button onClick={() => { setIsEditingTutoria(false); setNewTutoria({ nombre_grupo: '', tutor_id: '', ciclo_id: activeCycleId || '' }); setShowTutorModal(true); }} className="bg-[#FFD100] text-[#003B5C] px-8 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl hover:scale-105 transition-all">+ Asignar Tutor</button>}
             {activeTab === 'students' && (
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={handleReviewAndFixDuplicates}
+                  disabled={isCheckingDuplicates}
+                  className="bg-amber-400 hover:bg-amber-500 text-[#003B5C] font-black px-6 py-3 rounded-2xl text-[10px] uppercase tracking-widest shadow-xl hover:scale-105 transition-all flex items-center gap-2 border border-amber-300"
+                  title="Revisar base de datos y corregir alumnos con registros repetidos utilizando la matrícula como referencia"
+                >
+                  <span className="text-sm">🔍</span>
+                  {isCheckingDuplicates ? 'Analizando BD...' : 'Corregir Repetidos'}
+                </button>
                 <button onClick={downloadCsvTemplate} className="bg-white/10 text-white border border-white/20 px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-white/20 transition-all">📄 Bajar Formato</button>
                 <button onClick={() => { setIsEditingStudent(false); setNewStudent({ matricula: '', nombre: '', carrera: Career.QFB, semestre: 1, grupo: '', turno: 'Matutino' }); setShowStudentModal(true); }} className="bg-[#FFD100] text-[#003B5C] px-8 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl hover:scale-105 transition-all">+ Nuevo Estudiante</button>
                 <button onClick={() => setShowCsvModal(true)} className="bg-white text-[#003B5C] px-8 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl hover:scale-105 transition-all">📂 Cargar CSV</button>
@@ -1015,7 +1506,16 @@ const AdminPanel: React.FC = () => {
                         ) : filteredSubjects.map(s => (
                           <tr key={s.id} className="hover:bg-gray-50 text-[12px] group transition-all">
                             <td className="px-8 py-5 font-mono font-black text-blue-600">{s.codigo}</td>
-                            <td className="px-8 py-5 font-bold">{s.nombre}</td>
+                            <td className="px-8 py-5 font-bold">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span>{s.nombre}</span>
+                                {(isSpecialtySemester(s.semestre) || s.tipo?.includes('Optativa') || s.es_optativa || s.codigo?.startsWith('OPT')) && (
+                                  <span className="px-2.5 py-0.5 bg-amber-100 text-amber-900 border border-amber-300 text-[9px] font-black rounded-full uppercase tracking-wider shadow-sm flex items-center gap-1">
+                                    <span>⭐</span> {s.tipo || 'Acentuación / Optativa'} ({s.semestre}° Semestre)
+                                  </span>
+                                )}
+                              </div>
+                            </td>
                             <td className="px-8 py-5 text-[10px] font-black uppercase text-gray-400">{s.carrera} • {s.semestre}°</td>
                             <td className="px-8 py-5 text-center font-black text-[#003B5C]">{s.creditos}</td>
                             <td className="px-8 py-5 text-right opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1107,22 +1607,60 @@ const AdminPanel: React.FC = () => {
 
               {activeTab === 'assignments' && (
                 <div className="space-y-6 animate-in slide-in-from-bottom-4">
-                  <div className="bg-gray-50 p-6 rounded-[2rem] border border-gray-100 grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="bg-gray-50 p-6 rounded-[2rem] border border-gray-100 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                     <input
                       type="text"
-                      placeholder="Buscar por materia o docente..."
+                      placeholder="Buscar por materia, docente o grupo..."
                       className="w-full bg-white border border-gray-200 p-4 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500/10"
                       value={assignmentFilters.search}
                       onChange={e => setAssignmentFilters({ ...assignmentFilters, search: e.target.value })}
                     />
-                    <select className="bg-white border border-gray-200 p-4 rounded-xl text-xs font-black" value={assignmentFilters.career} onChange={e => setAssignmentFilters({ ...assignmentFilters, career: e.target.value })}>
+                    <select
+                      className="bg-white border border-gray-200 p-4 rounded-xl text-xs font-black outline-none appearance-none cursor-pointer"
+                      value={assignmentFilters.career}
+                      onChange={e => setAssignmentFilters({ ...assignmentFilters, career: e.target.value, group: 'ALL' })}
+                    >
                       <option value="ALL">TODAS LAS CARRERAS</option>
                       {CAREERS.map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
-                    <select className="bg-white border border-gray-200 p-4 rounded-xl text-xs font-black" value={assignmentFilters.semester} onChange={e => setAssignmentFilters({ ...assignmentFilters, semester: e.target.value })}>
+                    <select
+                      className="bg-white border border-gray-200 p-4 rounded-xl text-xs font-black outline-none appearance-none cursor-pointer"
+                      value={assignmentFilters.semester}
+                      onChange={e => setAssignmentFilters({ ...assignmentFilters, semester: e.target.value, group: 'ALL' })}
+                    >
                       <option value="ALL">TODOS LOS SEMESTRES</option>
                       {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(s => <option key={s} value={s}>{s}° Semestre</option>)}
                     </select>
+                    <select
+                      className="bg-white border border-gray-200 p-4 rounded-xl text-xs font-black outline-none appearance-none cursor-pointer"
+                      value={assignmentFilters.group}
+                      onChange={e => setAssignmentFilters({ ...assignmentFilters, group: e.target.value })}
+                    >
+                      <option value="ALL">TODOS LOS GRUPOS</option>
+                      {availableGroupsForAssignments.map((g, idx) => (
+                        <option key={`assign-group-${g}-${idx}`} value={g}>Grupo {g}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 px-2 text-xs">
+                    <span className="text-gray-500 font-bold">
+                      Mostrando <strong className="text-[#003B5C] font-black">{filteredGroups.length}</strong> {filteredGroups.length === 1 ? 'asignación' : 'asignaciones'} de carga docente
+                      {assignmentFilters.group !== 'ALL' && (
+                        <span className="ml-2 bg-blue-50 text-[#003B5C] border border-blue-100 px-2.5 py-0.5 rounded-md font-black text-[10px]">
+                          Grupo: {assignmentFilters.group}
+                        </span>
+                      )}
+                    </span>
+                    {(assignmentFilters.search || assignmentFilters.career !== 'ALL' || assignmentFilters.semester !== 'ALL' || assignmentFilters.group !== 'ALL') && (
+                      <button
+                        type="button"
+                        onClick={() => setAssignmentFilters({ search: '', career: 'ALL', semester: 'ALL', group: 'ALL' })}
+                        className="text-[10px] font-black uppercase text-blue-600 hover:underline"
+                      >
+                        Restablecer Filtros
+                      </button>
+                    )}
                   </div>
 
                   <div className="bg-white border border-gray-100 rounded-[2rem] overflow-hidden shadow-sm overflow-x-auto">
@@ -1160,6 +1698,25 @@ const AdminPanel: React.FC = () => {
 
               {activeTab === 'students' && (
                 <div className="space-y-6 animate-in fade-in">
+                  <div className="bg-white p-4 px-6 rounded-2xl border border-gray-100 flex flex-wrap items-center justify-between gap-4 shadow-sm">
+                    <div className="flex items-center gap-3">
+                      <span className="text-2xl">🎓</span>
+                      <div>
+                        <h4 className="text-xs font-black text-[#003B5C] uppercase tracking-wider">Gestión de Matrícula y Depuración</h4>
+                        <p className="text-[10px] font-bold text-gray-400">Verifica y corrige registros repetidos en la base de datos utilizando el campo Matrícula</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleReviewAndFixDuplicates}
+                      disabled={isCheckingDuplicates}
+                      className="bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300/80 px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 shadow-sm"
+                      title="Revisar base de datos y corregir alumnos con registros repetidos utilizando la matrícula como referencia"
+                    >
+                      <span>🔍</span> {isCheckingDuplicates ? 'Analizando Base de Datos...' : 'Auditar y Corregir Repetidos (Matrícula)'}
+                    </button>
+                  </div>
+
                   <div className="bg-gray-50 p-6 rounded-[2rem] border border-gray-100 grid grid-cols-1 md:grid-cols-4 gap-4">
                     <select
                       className="bg-white border border-gray-200 p-4 rounded-xl text-xs font-black outline-none appearance-none cursor-pointer"
@@ -1727,6 +2284,559 @@ const AdminPanel: React.FC = () => {
               <button disabled={isSaving} className="w-full bg-[#003B5C] text-white py-4 rounded-[2rem] font-black text-xs uppercase tracking-widest shadow-xl">{isSaving ? 'Guardando...' : 'Registrar Estudiante'}</button>
               <button type="button" onClick={() => setShowStudentModal(false)} className="w-full text-gray-400 font-bold text-[10px] uppercase text-center">Cancelar</button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: GENERADOR DE ACENTUACIONES Y OPTATIVAS LIBRES (7°, 8° Y 9°) */}
+      {showAccentuationGeneratorModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-[110] p-4">
+          <div className="bg-white rounded-[3.5rem] shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-y-auto p-8 md:p-12 animate-in zoom-in-95 space-y-8">
+            {/* Header del Modal */}
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 pb-6 border-b border-gray-100">
+              <div className="flex items-center gap-4">
+                <div className="w-14 h-14 rounded-2xl bg-[#003B5C] text-[#FFD100] flex items-center justify-center text-2xl shadow-lg">
+                  ⚡
+                </div>
+                <div>
+                  <h3 className="text-2xl font-black text-[#003B5C] tracking-tight">
+                    Generador de Temas de Acentuación y Optativas Libres
+                  </h3>
+                  <p className="text-gray-400 font-bold text-[10px] uppercase tracking-widest mt-1">
+                    Semestres 7°, 8° y 9° • Especialidad para QFB, IBQ, IQ y BG
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowAccentuationGeneratorModal(false)}
+                className="w-10 h-10 rounded-xl bg-gray-100 text-gray-500 hover:bg-gray-200 flex items-center justify-center font-black transition-all"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Banner Informativo y Métricas */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="bg-blue-50/60 border border-blue-100 p-5 rounded-2xl">
+                <span className="text-[10px] font-black text-blue-700 uppercase tracking-widest block mb-1">Estatus Semestres</span>
+                <span className="text-lg font-black text-[#003B5C]">7°, 8° y 9° Semestre</span>
+                <p className="text-[9px] text-gray-500 font-bold mt-1">Acentuación y Subgrupos</p>
+              </div>
+              <div className="bg-amber-50/60 border border-amber-100 p-5 rounded-2xl">
+                <span className="text-[10px] font-black text-amber-800 uppercase tracking-widest block mb-1">Acentuaciones en Catálogo</span>
+                <span className="text-lg font-black text-amber-900">
+                  {accentuations.filter(a => isSpecialtySemester(a.semestre) || !a.semestre).length} Registradas
+                </span>
+                <p className="text-[9px] text-gray-500 font-bold mt-1">Subgrupos configurables</p>
+              </div>
+              <div className="bg-emerald-50/60 border border-emerald-100 p-5 rounded-2xl">
+                <span className="text-[10px] font-black text-emerald-800 uppercase tracking-widest block mb-1">Materias de Especialidad</span>
+                <span className="text-lg font-black text-emerald-900">
+                  {subjects.filter(s => isSpecialtySemester(s.semestre)).length} Materias
+                </span>
+                <p className="text-[9px] text-gray-500 font-bold mt-1">En plan de estudios</p>
+              </div>
+            </div>
+
+            {/* SECCIÓN 1: Generación Automática */}
+            <div className="bg-gray-50/80 p-8 rounded-[2.5rem] border border-gray-200/60 space-y-6">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                <div>
+                  <h4 className="text-sm font-black uppercase tracking-wider text-[#003B5C] flex items-center gap-2">
+                    <span>🚀</span> Generación Rápida desde Catálogo Oficial FCQB
+                  </h4>
+                  <p className="text-gray-400 font-bold text-[10px] uppercase tracking-widest mt-0.5">
+                    Siembra automática de temas y materias de optativa libre para los semestres señalados
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Programa Educativo</label>
+                  <select
+                    value={generatorCareer}
+                    onChange={e => setGeneratorCareer(e.target.value)}
+                    className="w-full bg-white border border-gray-200 p-4 rounded-2xl text-xs font-bold outline-none cursor-pointer"
+                  >
+                    <option value="ALL">TODAS LAS CARRERAS (QFB, IBQ, IQ, BG)</option>
+                    {CAREERS.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Semestre de Acentuación</label>
+                  <select
+                    value={generatorSemester}
+                    onChange={e => setGeneratorSemester(e.target.value)}
+                    className="w-full bg-white border border-gray-200 p-4 rounded-2xl text-xs font-bold outline-none cursor-pointer"
+                  >
+                    <option value="ALL">TODOS LOS SEMESTRES (7°, 8° y 9°)</option>
+                    {SPECIALTY_SEMESTERS.map(s => <option key={s} value={s}>{s}° Semestre</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 p-3 bg-white rounded-2xl border border-gray-200">
+                <input
+                  type="checkbox"
+                  id="syncMateriasCheck"
+                  checked={syncWithOfficialSubjects}
+                  onChange={e => setSyncWithOfficialSubjects(e.target.checked)}
+                  className="w-4 h-4 text-blue-600 rounded cursor-pointer"
+                />
+                <label htmlFor="syncMateriasCheck" className="text-xs font-bold text-gray-700 cursor-pointer">
+                  Sincronizar y registrar también como materias oficiales en la tabla de asignaturas del plan de estudios
+                </label>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-2">
+                <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
+                  {DEFAULT_SPECIALTY_CATALOG.filter(item => {
+                    const cMatch = generatorCareer === 'ALL' || item.carrera === generatorCareer;
+                    const sMatch = generatorSemester === 'ALL' || item.semestre === parseInt(generatorSemester);
+                    return cMatch && sMatch;
+                  }).length} temas oficiales listos para generar
+                </span>
+                <button
+                  type="button"
+                  disabled={isGeneratingCatalog}
+                  onClick={handleGenerateDefaultCatalog}
+                  className="w-full sm:w-auto px-8 py-3.5 bg-[#003B5C] text-white hover:bg-blue-900 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {isGeneratingCatalog ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      <span>Generando e integrando...</span>
+                    </>
+                  ) : (
+                    <span>✨ Generar Temas y Materias Ahora</span>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* SECCIÓN 2: Crear Tema Manual */}
+            <div className="bg-white p-8 rounded-[2.5rem] border border-gray-200/80 space-y-6">
+              <h4 className="text-sm font-black uppercase tracking-wider text-[#003B5C] flex items-center gap-2">
+                <span>➕</span> Crear Tema de Acentuación u Optativa Personalizada
+              </h4>
+
+              <form onSubmit={handleSaveCustomAccentuation} className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="md:col-span-2 space-y-1">
+                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Nombre del Tema / Materia</label>
+                    <input
+                      type="text"
+                      placeholder="Ej: Bioseguridad y Diagnóstico Clínico..."
+                      value={customAccentuation.nombre}
+                      onChange={e => setCustomAccentuation({ ...customAccentuation, nombre: e.target.value })}
+                      className="w-full bg-gray-50 border border-gray-200 p-4 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-[#003B5C]/20"
+                      required
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Tipo de Optativa</label>
+                    <select
+                      value={customAccentuation.tipo_optativa}
+                      onChange={e => setCustomAccentuation({ ...customAccentuation, tipo_optativa: e.target.value })}
+                      className="w-full bg-gray-50 border border-gray-200 p-4 rounded-xl text-xs font-bold outline-none cursor-pointer"
+                    >
+                      <option value="OL I">Optativa Libre I (OL I)</option>
+                      <option value="OL II">Optativa Libre II (OL II)</option>
+                      <option value="OL III">Optativa Libre III (OL III)</option>
+                      <option value="OE I">Optativa de Especialidad I (OE I)</option>
+                      <option value="OE II">Optativa de Especialidad II (OE II)</option>
+                      <option value="OE III">Optativa de Especialidad III (OE III)</option>
+                      <option value="OE IV">Optativa de Especialidad IV (OE IV)</option>
+                      <option value="OP I">Optativa Profesionalizante I (OP I)</option>
+                      <option value="OP II">Optativa Profesionalizante II (OP II)</option>
+                      <option value="OP III">Optativa Profesionalizante III (OP III)</option>
+                      <option value="OP IV">Optativa Profesionalizante IV (OP IV)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                  <div className="sm:col-span-2 space-y-1">
+                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Programa Educativo</label>
+                    <select
+                      value={customAccentuation.carrera}
+                      onChange={e => setCustomAccentuation({ ...customAccentuation, carrera: e.target.value as Career })}
+                      className="w-full bg-gray-50 border border-gray-200 p-4 rounded-xl text-xs font-bold outline-none cursor-pointer"
+                    >
+                      {CAREERS.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Semestre</label>
+                    <select
+                      value={customAccentuation.semestre}
+                      onChange={e => setCustomAccentuation({ ...customAccentuation, semestre: parseInt(e.target.value) })}
+                      className="w-full bg-gray-50 border border-gray-200 p-4 rounded-xl text-xs font-bold outline-none cursor-pointer"
+                    >
+                      {SPECIALTY_SEMESTERS.map(s => <option key={s} value={s}>{s}° Semestre</option>)}
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Créditos</label>
+                    <input
+                      type="number"
+                      value={customAccentuation.creditos}
+                      onChange={e => setCustomAccentuation({ ...customAccentuation, creditos: parseInt(e.target.value) || 10 })}
+                      className="w-full bg-gray-50 border border-gray-200 p-4 rounded-xl text-xs font-bold outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-2">
+                  <label className="flex items-center gap-2 text-xs font-bold text-gray-600 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={customAccentuation.crearMateria}
+                      onChange={e => setCustomAccentuation({ ...customAccentuation, crearMateria: e.target.checked })}
+                      className="w-4 h-4 text-blue-600 rounded"
+                    />
+                    Registrar automáticamente en catálogo de materias oficiales
+                  </label>
+                  <button
+                    type="submit"
+                    disabled={isGeneratingCatalog}
+                    className="w-full sm:w-auto px-8 py-3.5 bg-[#FFD100] text-[#003B5C] rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:scale-105 transition-all"
+                  >
+                    + Registrar Tema de Acentuación
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            {/* SECCIÓN 3: Catálogo Registrado en el Sistema */}
+            <div className="space-y-4">
+              <h4 className="text-sm font-black uppercase tracking-wider text-[#003B5C] flex items-center justify-between">
+                <span>📋 Temas de Acentuación Registrados (Semestres 7°, 8° y 9°)</span>
+                <span className="text-gray-400 text-xs font-bold lowercase">
+                  {accentuations.filter(a => isSpecialtySemester(a.semestre) || !a.semestre).length} registros
+                </span>
+              </h4>
+
+              <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden overflow-x-auto max-h-72">
+                <table className="w-full text-left">
+                  <thead className="bg-[#003B5C]/5 text-[10px] font-black uppercase text-[#003B5C] border-b sticky top-0">
+                    <tr>
+                      <th className="px-6 py-3">Semestre</th>
+                      <th className="px-6 py-3">Carrera</th>
+                      <th className="px-6 py-3">Tema / Materia</th>
+                      <th className="px-6 py-3">Tipo</th>
+                      <th className="px-6 py-3 text-right">Acción</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 text-xs">
+                    {accentuations
+                      .filter(a => isSpecialtySemester(a.semestre) || !a.semestre)
+                      .map(a => (
+                        <tr key={a.id} className="hover:bg-gray-50 transition-colors">
+                          <td className="px-6 py-3 font-black text-[#003B5C]">{a.semestre || 8}°</td>
+                          <td className="px-6 py-3 text-gray-500 font-bold">{a.carrera}</td>
+                          <td className="px-6 py-3 font-bold text-gray-900">{a.nombre}</td>
+                          <td className="px-6 py-3">
+                            <span className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded-md font-black text-[9px] border border-blue-100">
+                              {a.tipo_optativa}
+                            </span>
+                          </td>
+                          <td className="px-6 py-3 text-right">
+                            <button
+                              onClick={() => handleDeleteAccentuation(a.id, a.nombre)}
+                              className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg text-xs"
+                              title="Eliminar tema"
+                            >
+                              🗑️
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="pt-4 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowAccentuationGeneratorModal(false)}
+                className="px-8 py-3 bg-gray-100 text-gray-600 hover:bg-gray-200 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL REVISIÓN Y CORRECCIÓN DE ALUMNOS REPETIDOS POR MATRÍCULA */}
+      {showDuplicatesModal && duplicatesReport && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-[115] p-4">
+          <div className="bg-white rounded-[3rem] shadow-2xl w-full max-w-4xl p-8 sm:p-10 max-h-[90vh] flex flex-col animate-in zoom-in-95">
+            {/* Header */}
+            <div className="flex items-start justify-between pb-6 border-b border-gray-100">
+              <div className="flex items-center gap-4">
+                <div className="w-14 h-14 bg-amber-50 text-amber-700 rounded-2xl flex items-center justify-center text-2xl border border-amber-200 shadow-sm">
+                  🔍
+                </div>
+                <div>
+                  <h3 className="text-2xl font-black text-[#003B5C] tracking-tight">Auditoría y Corrección de Matrícula</h3>
+                  <p className="text-gray-400 font-bold text-[10px] uppercase tracking-widest mt-0.5">
+                    Revisión de registros repetidos utilizando el campo Matrícula • {duplicatesReport.totalScanned} estudiantes verificados
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowDuplicatesModal(false)}
+                className="w-10 h-10 bg-gray-100 hover:bg-gray-200 text-gray-500 rounded-xl flex items-center justify-center text-sm font-black transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Resumen Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 my-6">
+              <div className={`p-4 rounded-2xl border ${duplicatesReport.matriculaDuplicates.length > 0 ? 'bg-red-50/50 border-red-200' : 'bg-emerald-50/50 border-emerald-200'}`}>
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-gray-500">Matrículas Repetidas</span>
+                  <span className={`text-lg font-black ${duplicatesReport.matriculaDuplicates.length > 0 ? 'text-red-600' : 'text-emerald-700'}`}>
+                    {duplicatesReport.matriculaDuplicates.length}
+                  </span>
+                </div>
+                <p className="text-[9px] text-gray-400 mt-1">Registros con el mismo ID / Matrícula</p>
+              </div>
+
+              <div className={`p-4 rounded-2xl border ${duplicatesReport.historialDuplicates.length > 0 ? 'bg-amber-50/50 border-amber-200' : 'bg-emerald-50/50 border-emerald-200'}`}>
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-gray-500">Historial Duplicado</span>
+                  <span className={`text-lg font-black ${duplicatesReport.historialDuplicates.length > 0 ? 'text-amber-600' : 'text-emerald-700'}`}>
+                    {duplicatesReport.historialDuplicates.length}
+                  </span>
+                </div>
+                <p className="text-[9px] text-gray-400 mt-1">Misma matrícula y periodo en historial</p>
+              </div>
+
+              <div className="p-4 rounded-2xl border bg-blue-50/50 border-blue-200">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-gray-500">Mismo Nombre / Dif. Matrícula</span>
+                  <span className="text-lg font-black text-blue-700">
+                    {duplicatesReport.nameDuplicates.length}
+                  </span>
+                </div>
+                <p className="text-[9px] text-gray-400 mt-1">Posibles alumnos re-inscritos con otro ID</p>
+              </div>
+            </div>
+
+            {/* Banner Estado General */}
+            {duplicatesReport.matriculaDuplicates.length === 0 && duplicatesReport.historialDuplicates.length === 0 && duplicatesReport.whitespaceIssues.length === 0 ? (
+              <div className="p-5 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center gap-3 text-emerald-800 mb-6">
+                <span className="text-2xl">✅</span>
+                <div className="text-xs">
+                  <p className="font-black">¡Base de datos íntegra y sin duplicados!</p>
+                  <p className="text-emerald-700 text-[11px] font-semibold mt-0.5">
+                    Se verificó el 100% de la matrícula ({duplicatesReport.totalScanned} alumnos) y no se encontraron registros repetidos en el campo matrícula.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="p-5 bg-amber-50 border border-amber-200 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 text-amber-900 mb-6">
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">⚠️</span>
+                  <div className="text-xs">
+                    <p className="font-black">Se detectaron registros que requieren unificación</p>
+                    <p className="text-amber-800 text-[11px] font-semibold mt-0.5">
+                      Puedes corregirlos automáticamente conservando el registro con mayor avance y re-vinculando calificaciones y asistencias.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={executeFixDuplicates}
+                  disabled={isFixingDuplicates}
+                  className="bg-[#003B5C] hover:bg-blue-900 text-white font-black px-6 py-3 rounded-xl text-[10px] uppercase tracking-widest transition-all shadow-md shrink-0 flex items-center gap-2"
+                >
+                  <span>⚡</span> {isFixingDuplicates ? 'Corrigiendo...' : 'Corregir Duplicados'}
+                </button>
+              </div>
+            )}
+
+            {/* Pestañas de detalle */}
+            <div className="flex border-b border-gray-100 mb-4">
+              <button
+                type="button"
+                onClick={() => setActiveDuplicateTab('matricula')}
+                className={`pb-3 px-4 text-xs font-black uppercase tracking-wider border-b-2 transition-all ${
+                  activeDuplicateTab === 'matricula' ? 'border-[#003B5C] text-[#003B5C]' : 'border-transparent text-gray-400 hover:text-gray-600'
+                }`}
+              >
+                Por Matrícula ({duplicatesReport.matriculaDuplicates.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveDuplicateTab('historial')}
+                className={`pb-3 px-4 text-xs font-black uppercase tracking-wider border-b-2 transition-all ${
+                  activeDuplicateTab === 'historial' ? 'border-[#003B5C] text-[#003B5C]' : 'border-transparent text-gray-400 hover:text-gray-600'
+                }`}
+              >
+                Historial Ciclos ({duplicatesReport.historialDuplicates.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveDuplicateTab('names')}
+                className={`pb-3 px-4 text-xs font-black uppercase tracking-wider border-b-2 transition-all ${
+                  activeDuplicateTab === 'names' ? 'border-[#003B5C] text-[#003B5C]' : 'border-transparent text-gray-400 hover:text-gray-600'
+                }`}
+              >
+                Mismo Nombre ({duplicatesReport.nameDuplicates.length})
+              </button>
+            </div>
+
+            {/* Contenido scrolleable de pestañas */}
+            <div className="flex-1 overflow-y-auto space-y-4 pr-1">
+              {activeDuplicateTab === 'matricula' && (
+                <div>
+                  {duplicatesReport.matriculaDuplicates.length === 0 ? (
+                    <div className="py-12 text-center text-gray-300 font-black uppercase text-xs">
+                      No hay matrículas duplicadas en la tabla principal de estudiantes.
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {duplicatesReport.matriculaDuplicates.map((item, idx) => (
+                        <div key={idx} className="p-4 bg-gray-50 border border-gray-200 rounded-2xl">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="font-mono text-sm font-black text-blue-700">
+                              Matrícula: {item.matricula}
+                            </span>
+                            <span className="text-[10px] font-black uppercase bg-red-100 text-red-700 px-2.5 py-0.5 rounded-full">
+                              {item.students.length} registros repetidos
+                            </span>
+                          </div>
+                          <div className="divide-y divide-gray-200 text-xs">
+                            {item.students.map((s, sIdx) => {
+                              const isMaster = s.id === item.masterStudent.id;
+                              return (
+                                <div key={sIdx} className="py-2 flex items-center justify-between">
+                                  <div>
+                                    <span className="font-bold text-gray-800">{s.nombre}</span>
+                                    <span className="text-gray-400 text-[10px] ml-2 font-semibold">
+                                      {s.carrera} • Grupo {s.grupo} • {s.semestre}° Sem.
+                                    </span>
+                                  </div>
+                                  {isMaster ? (
+                                    <span className="text-[9px] font-black uppercase bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-md">
+                                      ✓ Principal sugerido
+                                    </span>
+                                  ) : (
+                                    <span className="text-[9px] font-black uppercase bg-gray-100 text-gray-500 px-2 py-0.5 rounded-md">
+                                      A unificar / eliminar
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {activeDuplicateTab === 'historial' && (
+                <div>
+                  {duplicatesReport.historialDuplicates.length === 0 ? (
+                    <div className="py-12 text-center text-gray-300 font-black uppercase text-xs">
+                      No hay registros duplicados en el historial periodo a periodo.
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {duplicatesReport.historialDuplicates.map((item, idx) => (
+                        <div key={idx} className="p-3.5 bg-gray-50 border border-gray-200 rounded-xl flex items-center justify-between text-xs">
+                          <div>
+                            <span className="font-mono font-bold text-blue-700">{item.estudiante_id}</span>
+                            <span className="text-gray-400 text-[10px] ml-2">Ciclo: {item.ciclo_id}</span>
+                          </div>
+                          <span className="text-[10px] font-black text-amber-700 bg-amber-100 px-2.5 py-0.5 rounded-full">
+                            {item.records.length} entradas repetidas
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {activeDuplicateTab === 'names' && (
+                <div>
+                  {duplicatesReport.nameDuplicates.length === 0 ? (
+                    <div className="py-12 text-center text-gray-300 font-black uppercase text-xs">
+                      No se encontraron alumnos con el mismo nombre y matrículas distintas.
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <p className="text-[10px] text-gray-500 font-bold bg-blue-50/50 p-3 rounded-xl border border-blue-100">
+                        ℹ️ Estos alumnos comparten el mismo nombre exacto pero tienen matrículas distintas en el sistema. Puedes unificarlos a la matrícula correcta:
+                      </p>
+                      {duplicatesReport.nameDuplicates.map((item, idx) => (
+                        <div key={idx} className="p-4 bg-gray-50 border border-gray-200 rounded-2xl">
+                          <div className="font-bold text-sm text-gray-900 mb-3">{item.name}</div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {item.students.map((s, sIdx) => {
+                              const otherStudent = item.students.find(x => x.id !== s.id);
+                              return (
+                                <div key={sIdx} className="p-3 bg-white border border-gray-200 rounded-xl flex flex-col justify-between">
+                                  <div>
+                                    <div className="flex items-center justify-between">
+                                      <span className="font-mono text-xs font-black text-blue-700">Matrícula: {s.id}</span>
+                                      <span className="text-[9px] font-bold text-gray-400">{s.semestre}° Semestre</span>
+                                    </div>
+                                    <p className="text-[10px] text-gray-500 font-semibold mt-1">
+                                      {s.carrera} • Grupo {s.grupo} • {s.turno}
+                                    </p>
+                                  </div>
+                                  {otherStudent && (
+                                    <button
+                                      type="button"
+                                      disabled={isFixingDuplicates}
+                                      onClick={() => handleMergeStudentsByName(s.id, otherStudent.id, item.name)}
+                                      className="mt-3 w-full bg-blue-50 hover:bg-[#003B5C] text-[#003B5C] hover:text-white text-[9px] font-black uppercase py-2 rounded-lg transition-colors border border-blue-200 text-center"
+                                      title={`Conservar esta matrícula (${s.id}) y fusionar la otra (${otherStudent.id})`}
+                                    >
+                                      Conservar esta Matrícula ({s.id})
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="pt-6 border-t border-gray-100 flex items-center justify-between mt-4">
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                STA-FCQB • Auditoría de Integridad
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowDuplicatesModal(false)}
+                className="px-8 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all"
+              >
+                Cerrar
+              </button>
+            </div>
           </div>
         </div>
       )}

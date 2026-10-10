@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../services/supabaseClient';
 import { CAREERS } from '../constants';
+import { CicloEscolar } from '../types';
+import TeacherCertificateModal from './TeacherCertificateModal';
 
 interface TeacherAnalyticsData {
     docenteId: string;
@@ -10,17 +12,46 @@ interface TeacherAnalyticsData {
     materiaNombre: string;
     carrera: string;
     semestre: number;
+    cicloNombre: string;
     actividadesCount: number;
     asistenciasCount: number;
     lastActivityDate: string | null;
     lastAttendanceDate: string | null;
 }
 
-const TeacherAnalytics: React.FC = () => {
+interface TeacherAnalyticsProps {
+    selectedCycleId?: string;
+}
+
+const TeacherAnalytics: React.FC<TeacherAnalyticsProps> = ({ selectedCycleId: externalCycleId }) => {
     const [loading, setLoading] = useState(true);
     const [data, setData] = useState<TeacherAnalyticsData[]>([]);
+    const [cycles, setCycles] = useState<CicloEscolar[]>([]);
+    const [selectedCycleId, setSelectedCycleId] = useState<string>(externalCycleId || 'ALL');
     const [selectedCareer, setSelectedCareer] = useState<string>('ALL');
     const [searchTerm, setSearchTerm] = useState('');
+    const [selectedTeacherCertId, setSelectedTeacherCertId] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (externalCycleId !== undefined) {
+            setSelectedCycleId(externalCycleId);
+        }
+    }, [externalCycleId]);
+
+    const fetchCycles = async () => {
+        try {
+            const { data } = await supabase
+                .from('ciclos_escolares')
+                .select('*')
+                .order('created_at', { ascending: false });
+
+            if (data && data.length > 0) {
+                setCycles(data);
+            }
+        } catch (err) {
+            console.error("Error al cargar ciclos en TeacherAnalytics:", err);
+        }
+    };
 
     const fetchAllRecords = async (table: string, selectQuery: string) => {
         let allData: any[] = [];
@@ -50,27 +81,39 @@ const TeacherAnalytics: React.FC = () => {
     const fetchAnalytics = async () => {
         setLoading(true);
         try {
-            // 1. Fetch ALL Groups with Docente and Materia info
-            const groups = await fetchAllRecords('grupos', `
-                id,
-                nombre_grupo,
-                docente_id,
-                docentes (id, nombre),
-                materias (nombre, carrera, semestre)
-            `);
+            fetchCycles();
 
-            // 2. Fetch ALL Activities (lightweight selection)
+            // 1. Fetch Groups filtered by cycle if selected
+            let groupQuery = supabase
+                .from('grupos')
+                .select(`
+                    id,
+                    nombre_grupo,
+                    docente_id,
+                    ciclo_id,
+                    ciclos_escolares (nombre),
+                    docentes (id, nombre),
+                    materias (nombre, carrera, semestre)
+                `);
+
+            if (selectedCycleId !== 'ALL') {
+                groupQuery = groupQuery.or(`ciclo_id.eq.${selectedCycleId},ciclo_id.is.null`);
+            }
+
+            const { data: groups, error: groupsErr } = await groupQuery;
+            if (groupsErr) throw groupsErr;
+
+            // 2. Fetch ALL Activities
             const activities = await fetchAllRecords('actividades', 'grupo_id, created_at');
 
-            // 3. Fetch ALL Attendance (optimized columns)
-            // We fetch all rows but only group_id and fecha to minimize bandwidth
-            // Client-side processing will handle the distinct counting
+            // 3. Fetch ALL Attendance
             const attendance = await fetchAllRecords('asistencias', 'grupo_id, fecha');
 
             // Process Data
             const processed: TeacherAnalyticsData[] = (groups || []).map((group: any) => {
                 const docente = Array.isArray(group.docentes) ? group.docentes[0] : group.docentes;
                 const materia = Array.isArray(group.materias) ? group.materias[0] : group.materias;
+                const ciclo = Array.isArray(group.ciclos_escolares) ? group.ciclos_escolares[0] : group.ciclos_escolares;
 
                 // Filter activities for this group
                 const groupActivities = activities.filter((a: any) => a.grupo_id === group.id);
@@ -103,6 +146,7 @@ const TeacherAnalytics: React.FC = () => {
                     materiaNombre: materia?.nombre || 'Sin Materia',
                     carrera: materia?.carrera || 'N/A',
                     semestre: materia?.semestre || 0,
+                    cicloNombre: ciclo?.nombre || '2025-2026-2',
                     actividadesCount: activitiesCount,
                     asistenciasCount,
                     lastActivityDate,
@@ -121,7 +165,7 @@ const TeacherAnalytics: React.FC = () => {
 
     useEffect(() => {
         fetchAnalytics();
-    }, []);
+    }, [selectedCycleId]);
 
     // Filter Data
     const filteredData = data.filter(item => {
@@ -207,6 +251,19 @@ const TeacherAnalytics: React.FC = () => {
                         <option value="ALL">TODAS LAS CARRERAS</option>
                         {CAREERS.map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
+
+                    <select
+                        className="bg-blue-50/60 border border-blue-200 text-[#003B5C] p-3 rounded-xl text-xs font-black outline-none focus:ring-2 focus:ring-blue-500/10 cursor-pointer shadow-sm"
+                        value={selectedCycleId}
+                        onChange={e => setSelectedCycleId(e.target.value)}
+                    >
+                        <option value="ALL">HISTÓRICO GENERAL (2025-2026-2 AL ACTUAL)</option>
+                        {cycles.map(c => (
+                            <option key={c.id} value={c.id}>
+                                Periodo: {c.nombre} {c.es_activo ? '(Activo)' : ''}
+                            </option>
+                        ))}
+                    </select>
                 </div>
             </div>
 
@@ -220,13 +277,14 @@ const TeacherAnalytics: React.FC = () => {
                             <th className="px-6 py-4 text-center">Días Asistencia</th>
                             <th className="px-6 py-4 text-center">Última Actividad</th>
                             <th className="px-6 py-4 text-center">Último Pase</th>
-                            <th className="px-6 py-4 text-center rounded-r-xl">Estado</th>
+                            <th className="px-6 py-4 text-center">Estado</th>
+                            <th className="px-6 py-4 text-center rounded-r-xl">Constancia</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
                         {filteredData.length === 0 ? (
                             <tr>
-                                <td colSpan={7} className="py-12 text-center text-gray-300 font-bold text-xs uppercase">No se encontraron registros</td>
+                                <td colSpan={8} className="py-12 text-center text-gray-300 font-bold text-xs uppercase">No se encontraron registros</td>
                             </tr>
                         ) : (
                             filteredData.map((row) => {
@@ -239,8 +297,9 @@ const TeacherAnalytics: React.FC = () => {
                                         </td>
                                         <td className="px-6 py-4">
                                             <div className="font-bold text-xs text-[#003B5C]">{row.materiaNombre}</div>
-                                            <div className="flex items-center gap-2 mt-1">
-                                                <span className="bg-gray-100 text-gray-500 px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wide">{row.grupoNombre}</span>
+                                            <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                                                <span className="bg-gray-100 text-gray-700 px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wide">{row.grupoNombre}</span>
+                                                <span className="bg-blue-50 text-blue-700 px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wide border border-blue-100">{row.cicloNombre}</span>
                                                 <span className="text-[8px] font-bold text-gray-400 uppercase truncate max-w-[120px]">{row.carrera}</span>
                                             </div>
                                         </td>
@@ -272,6 +331,19 @@ const TeacherAnalytics: React.FC = () => {
                                                 {isActive ? 'ACTIVO' : 'INACTIVO'}
                                             </span>
                                         </td>
+                                        <td className="px-6 py-4 text-center">
+                                            {row.docenteId && row.docenteId !== 'N/A' ? (
+                                                <button
+                                                    onClick={() => setSelectedTeacherCertId(row.docenteId)}
+                                                    className="inline-flex items-center gap-1 bg-[#003B5C] text-[#FFD100] px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider hover:bg-blue-900 transition-all shadow-xs"
+                                                    title="Ver / Descargar Constancia PDF"
+                                                >
+                                                    <span>📄</span> PDF
+                                                </button>
+                                            ) : (
+                                                <span className="text-[9px] text-gray-300 font-bold">-</span>
+                                            )}
+                                        </td>
                                     </tr>
                                 );
                             })
@@ -279,6 +351,14 @@ const TeacherAnalytics: React.FC = () => {
                     </tbody>
                 </table>
             </div>
+
+            {selectedTeacherCertId && (
+                <TeacherCertificateModal
+                    userId={selectedTeacherCertId}
+                    cycleId={selectedCycleId !== 'ALL' ? selectedCycleId : undefined}
+                    onClose={() => setSelectedTeacherCertId(null)}
+                />
+            )}
         </div>
     );
 };

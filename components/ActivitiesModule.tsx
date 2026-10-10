@@ -50,7 +50,7 @@ const ActivitiesModule: React.FC<ActivitiesModuleProps> = ({ userId, role }) => 
         .order('created_at', { ascending: false });
 
       if (activeCycle) {
-        query = query.or(`ciclo_id.eq.${activeCycle.id},ciclo_id.is.null`);
+        query = query.eq('ciclo_id', activeCycle.id);
       }
 
       const { data, error } = await query;
@@ -74,7 +74,7 @@ const ActivitiesModule: React.FC<ActivitiesModuleProps> = ({ userId, role }) => 
         .eq('docente_id', userId);
 
       if (activeCycle) {
-        query = query.or(`ciclo_id.eq.${activeCycle.id},ciclo_id.is.null`);
+        query = query.eq('ciclo_id', activeCycle.id);
       }
 
       const { data } = await query;
@@ -267,12 +267,42 @@ const ActivitiesModule: React.FC<ActivitiesModuleProps> = ({ userId, role }) => 
       }
 
       if (students.length === 0) {
-        const { data: rawStudents } = await supabase
-          .from('estudiantes')
-          .select('*')
-          .eq('grupo', activity.grupo_nombre)
-          .order('nombre', { ascending: true });
-        students = rawStudents || [];
+        if (activity.grupo_nombre?.startsWith('SUB - ')) {
+          const accName = activity.grupo_nombre.replace('SUB - ', '').trim();
+          const { data: accData } = await supabase.from('acentuaciones').select('id').eq('nombre', accName).maybeSingle();
+          if (accData) {
+            const { data: stAccRows } = await supabase
+              .from('estudiantes_acentuacion')
+              .select('estudiante_id, estudiantes(*)')
+              .eq('acentuacion_id', accData.id);
+            if (stAccRows && stAccRows.length > 0) {
+              students = stAccRows.map(r => {
+                const st = getRelation(r.estudiantes);
+                return st ? {
+                  id: st.id,
+                  nombre: st.nombre,
+                  carrera: st.carrera,
+                  semestre: st.semestre,
+                  grupo: st.grupo
+                } : null;
+              }).filter(Boolean);
+            }
+          }
+        }
+
+        if (students.length === 0) {
+          let rawQuery = supabase
+            .from('estudiantes')
+            .select('*')
+            .eq('grupo', activity.grupo_nombre);
+
+          if (activeCycle) {
+            rawQuery = rawQuery.eq('ciclo_id', activeCycle.id);
+          }
+
+          const { data: rawStudents } = await rawQuery.order('nombre', { ascending: true });
+          students = rawStudents || [];
+        }
       }
 
       const { data: existingGrades } = await supabase.from('calificaciones').select('*').eq('actividad_id', activity.id);
@@ -334,32 +364,209 @@ const ActivitiesModule: React.FC<ActivitiesModuleProps> = ({ userId, role }) => 
       </div>
 
       {showCreateModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-[100] p-4">
-          <div className="bg-white rounded-[3.5rem] shadow-2xl w-full max-w-xl p-12 overflow-y-auto max-h-[90vh]">
-            <h3 className="text-2xl font-black text-[#003B5C] mb-8">{isEditing ? 'Editar Actividad' : 'Nueva Actividad'}</h3>
-            <form onSubmit={handleSaveActivity} className="space-y-6">
-              <div className="space-y-1">
-                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Grupo Asignado</label>
-                <select className="w-full bg-gray-50 border border-gray-100 p-4 rounded-xl font-bold text-sm outline-none" value={newActivity.grupo_id} onChange={e => setNewActivity({...newActivity, grupo_id: e.target.value})} required>
-                  <option value="">Selecciona el grupo...</option>
-                  {assignedGroups.map(g => <option key={g.id} value={g.id}>{g.nombre_grupo} - {getRelation(g.materias)?.nombre}</option>)}
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-[100] p-3 sm:p-6 overflow-y-auto">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden border border-gray-100 my-auto animate-in zoom-in-95 duration-200">
+            {/* ENCABEZADO DEL FORMULARIO */}
+            <div className="bg-[#003B5C] text-white p-5 sm:p-6 flex justify-between items-center border-b-4 border-[#FFD100]">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-white/10 flex items-center justify-center text-xl shadow-inner border border-white/10">
+                  {isEditing ? '✏️' : '📝'}
+                </div>
+                <div>
+                  <span className="text-[9px] font-black uppercase tracking-widest text-[#FFD100] block">
+                    Sistema STA • Gestión Docente
+                  </span>
+                  <h3 className="text-lg sm:text-xl font-black tracking-tight text-white">
+                    {isEditing ? 'Editar Actividad Académica' : 'Nueva Actividad Académica'}
+                  </h3>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCreateModal(false)}
+                className="w-9 h-9 flex items-center justify-center bg-white/10 hover:bg-white/20 rounded-xl text-white transition-all"
+                title="Cerrar"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* FORMULARIO */}
+            <form onSubmit={handleSaveActivity} className="p-6 sm:p-8 space-y-6 max-h-[78vh] overflow-y-auto">
+              
+              {/* CAMPO 1: GRUPO Y ASIGNATURA */}
+              <div className="space-y-2">
+                <div className="flex justify-between items-center">
+                  <label className="text-xs font-black text-[#003B5C] uppercase tracking-wider flex items-center gap-1.5">
+                    <span>👥</span>
+                    <span>Grupo y Asignatura Asignada</span>
+                    <span className="text-red-500">*</span>
+                  </label>
+                  <span className="text-[10px] text-gray-400 font-medium">Periodo Activo</span>
+                </div>
+                <select
+                  className="w-full bg-gray-50/80 hover:bg-gray-50 focus:bg-white border-2 border-gray-200 focus:border-[#003B5C] p-3.5 rounded-2xl font-bold text-xs sm:text-sm text-gray-800 outline-none transition-all shadow-xs"
+                  value={newActivity.grupo_id}
+                  onChange={e => setNewActivity({ ...newActivity, grupo_id: e.target.value })}
+                  required
+                >
+                  <option value="">Selecciona el grupo y asignatura...</option>
+                  {assignedGroups.map(g => (
+                    <option key={g.id} value={g.id}>
+                      Grupo {g.nombre_grupo} — {getRelation(g.materias)?.nombre || 'Asignatura'}
+                    </option>
+                  ))}
                 </select>
+                <p className="text-[11px] text-gray-500">
+                  La actividad se registrará únicamente para los alumnos de este grupo en el periodo escolar en curso.
+                </p>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <select className="w-full bg-gray-50 border p-4 rounded-xl font-bold text-sm" value={newActivity.tipo} onChange={e => setNewActivity({...newActivity, tipo: e.target.value as ActivityType})} required>
-                  <option value={ActivityType.TAREA}>Tarea</option>
-                  <option value={ActivityType.EJERCICIO}>Ejercicio</option>
-                  <option value={ActivityType.EXAMEN}>Examen</option>
-                </select>
-                <input type="number" min="1" className="w-full bg-gray-50 border p-4 rounded-xl font-bold text-sm" placeholder="Unidad" value={newActivity.unidad} onChange={e => setNewActivity({...newActivity, unidad: Number(e.target.value)})} required />
+
+              {/* CAMPO 2: TÍTULO DE LA ACTIVIDAD */}
+              <div className="space-y-2">
+                <label className="text-xs font-black text-[#003B5C] uppercase tracking-wider flex items-center gap-1.5">
+                  <span>📌</span>
+                  <span>Título o Nombre de la Actividad</span>
+                  <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  className="w-full bg-gray-50/80 hover:bg-gray-50 focus:bg-white border-2 border-gray-200 focus:border-[#003B5C] p-3.5 rounded-2xl font-bold text-xs sm:text-sm text-gray-900 outline-none transition-all shadow-xs placeholder:text-gray-400"
+                  placeholder="Ej. Tarea 2: Balanceo de Ecuaciones Químicas"
+                  value={newActivity.titulo}
+                  onChange={e => setNewActivity({ ...newActivity, titulo: e.target.value })}
+                  required
+                />
               </div>
-              <input type="text" className="w-full bg-gray-50 border p-4 rounded-xl font-bold text-sm" placeholder="Título" value={newActivity.titulo} onChange={e => setNewActivity({...newActivity, titulo: e.target.value})} required />
-              <div className="grid grid-cols-2 gap-4">
-                <input type="number" className="w-full bg-gray-50 border p-4 rounded-xl font-bold text-sm" placeholder="Puntos Max" value={newActivity.puntos_max} onChange={e => setNewActivity({...newActivity, puntos_max: Number(e.target.value)})} />
-                <input type="datetime-local" className="w-full bg-gray-50 border p-4 rounded-xl font-bold text-xs" value={newActivity.fecha_entrega} onChange={e => setNewActivity({...newActivity, fecha_entrega: e.target.value})} required />
+
+              {/* GRID 2 COLUMNAS: TIPO DE ACTIVIDAD Y UNIDAD TEMÁTICA */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                
+                {/* CAMPO 3: TIPO DE ACTIVIDAD */}
+                <div className="space-y-2">
+                  <label className="text-xs font-black text-[#003B5C] uppercase tracking-wider flex items-center gap-1.5">
+                    <span>🏷️</span>
+                    <span>Tipo de Actividad</span>
+                    <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    className="w-full bg-gray-50/80 hover:bg-gray-50 focus:bg-white border-2 border-gray-200 focus:border-[#003B5C] p-3.5 rounded-2xl font-bold text-xs sm:text-sm text-gray-800 outline-none transition-all shadow-xs"
+                    value={newActivity.tipo}
+                    onChange={e => setNewActivity({ ...newActivity, tipo: e.target.value as ActivityType })}
+                    required
+                  >
+                    <option value={ActivityType.TAREA}>📋 Tarea Académica</option>
+                    <option value={ActivityType.EJERCICIO}>✏️ Ejercicio / Práctica</option>
+                    <option value={ActivityType.EXAMEN}>📑 Examen Parcial / Departamental</option>
+                  </select>
+                </div>
+
+                {/* CAMPO 4: UNIDAD TEMÁTICA */}
+                <div className="space-y-2">
+                  <label className="text-xs font-black text-[#003B5C] uppercase tracking-wider flex items-center gap-1.5">
+                    <span>🎯</span>
+                    <span>Unidad de Aprendizaje</span>
+                    <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="10"
+                    className="w-full bg-gray-50/80 hover:bg-gray-50 focus:bg-white border-2 border-gray-200 focus:border-[#003B5C] p-3.5 rounded-2xl font-bold text-xs sm:text-sm text-gray-900 outline-none transition-all shadow-xs"
+                    placeholder="Ej. 1"
+                    value={newActivity.unidad}
+                    onChange={e => setNewActivity({ ...newActivity, unidad: Number(e.target.value) })}
+                    required
+                  />
+                </div>
               </div>
-              <button disabled={isSaving} className="w-full bg-[#003B5C] text-white py-5 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl">{isSaving ? 'Guardando...' : 'Guardar Actividad'}</button>
-              <button type="button" onClick={() => setShowCreateModal(false)} className="w-full text-gray-400 font-bold text-[10px] uppercase py-2">Cancelar</button>
+
+              {/* GRID 2 COLUMNAS: PUNTOS MÁXIMOS Y FECHA DE ENTREGA */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                
+                {/* CAMPO 5: PUNTOS MÁXIMOS */}
+                <div className="space-y-2">
+                  <label className="text-xs font-black text-[#003B5C] uppercase tracking-wider flex items-center gap-1.5">
+                    <span>⭐</span>
+                    <span>Puntaje Máximo (Ponderación)</span>
+                    <span className="text-red-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      min="1"
+                      className="w-full bg-gray-50/80 hover:bg-gray-50 focus:bg-white border-2 border-gray-200 focus:border-[#003B5C] p-3.5 pr-16 rounded-2xl font-bold text-xs sm:text-sm text-gray-900 outline-none transition-all shadow-xs"
+                      placeholder="10"
+                      value={newActivity.puntos_max}
+                      onChange={e => setNewActivity({ ...newActivity, puntos_max: Number(e.target.value) })}
+                      required
+                    />
+                    <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-black text-gray-400">
+                      pts
+                    </span>
+                  </div>
+                </div>
+
+                {/* CAMPO 6: FECHA Y HORA LÍMITE */}
+                <div className="space-y-2">
+                  <label className="text-xs font-black text-[#003B5C] uppercase tracking-wider flex items-center gap-1.5">
+                    <span>📅</span>
+                    <span>Fecha y Hora Límite de Entrega</span>
+                    <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="datetime-local"
+                    className="w-full bg-gray-50/80 hover:bg-gray-50 focus:bg-white border-2 border-gray-200 focus:border-[#003B5C] p-3.5 rounded-2xl font-bold text-xs sm:text-sm text-gray-900 outline-none transition-all shadow-xs"
+                    value={newActivity.fecha_entrega}
+                    onChange={e => setNewActivity({ ...newActivity, fecha_entrega: e.target.value })}
+                    required
+                  />
+                </div>
+              </div>
+
+              {/* CAMPO 7: DESCRIPCIÓN O INSTRUCCIONES */}
+              <div className="space-y-2">
+                <label className="text-xs font-black text-[#003B5C] uppercase tracking-wider flex items-center gap-1.5">
+                  <span>💬</span>
+                  <span>Instrucciones o Descripción Detallada</span>
+                  <span className="text-xs text-gray-400 font-medium lowercase">(opcional)</span>
+                </label>
+                <textarea
+                  rows={3}
+                  className="w-full bg-gray-50/80 hover:bg-gray-50 focus:bg-white border-2 border-gray-200 focus:border-[#003B5C] p-3.5 rounded-2xl font-medium text-xs sm:text-sm text-gray-900 outline-none transition-all shadow-xs resize-none placeholder:text-gray-400"
+                  placeholder="Describe los lineamientos, rúbrica, criterios de entrega o enlaces de consulta para los estudiantes..."
+                  value={newActivity.descripcion}
+                  onChange={e => setNewActivity({ ...newActivity, descripcion: e.target.value })}
+                />
+              </div>
+
+              {/* BOTONES DE ACCIÓN */}
+              <div className="pt-4 border-t border-gray-100 flex flex-col-reverse sm:flex-row justify-end items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateModal(false)}
+                  className="w-full sm:w-auto px-6 py-3.5 rounded-2xl text-xs font-black uppercase tracking-wider text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition-all text-center"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSaving}
+                  className="w-full sm:w-auto bg-[#003B5C] text-white hover:bg-blue-900 active:scale-95 px-8 py-3.5 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl flex items-center justify-center gap-2 border border-[#FFD100]/40 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  {isSaving ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
+                      <span>Guardando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>💾</span>
+                      <span>{isEditing ? 'Actualizar Actividad' : 'Guardar Actividad'}</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </form>
           </div>
         </div>

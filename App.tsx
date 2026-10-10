@@ -7,6 +7,7 @@ import GroupView from './components/GroupView';
 import AnalyticsView from './components/AnalyticsView';
 import StudentListView from './components/StudentListView';
 import ActivitiesModule from './components/ActivitiesModule';
+import TutoringFollowUpView from './components/TutoringFollowUpView';
 import Login from './components/Login';
 import { supabase, isSupabaseConfigured } from './services/supabaseClient';
 import SetupScreen from './components/SetupScreen';
@@ -17,7 +18,7 @@ const App: React.FC = () => {
   const [currentRole, setCurrentRole] = useState<UserRole>(UserRole.DOCENTE);
   const [userId, setUserId] = useState('');
   const [userName, setUserName] = useState('');
-  const [activeView, setActiveView] = useState<'dashboard' | 'groups' | 'admin' | 'analytics' | 'student-list' | 'activities'>('dashboard');
+  const [activeView, setActiveView] = useState<'dashboard' | 'groups' | 'admin' | 'analytics' | 'student-list' | 'activities' | 'followup'>('dashboard');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [activeCycle, setActiveCycle] = useState<CicloEscolar | null>(null);
 
@@ -132,6 +133,7 @@ const App: React.FC = () => {
   const navItems = [
     { id: 'dashboard', label: 'Inicio', icon: '🏠', roles: [UserRole.ADMIN, UserRole.DOCENTE, UserRole.TUTOR] },
     { id: 'student-list', label: 'Matrícula', icon: '📋', roles: [UserRole.ADMIN, UserRole.TUTOR, UserRole.DOCENTE] },
+    { id: 'followup', label: 'Canalizaciones', icon: '🛡️', roles: [UserRole.TUTOR, UserRole.ADMIN] },
     { id: 'groups', label: 'Asistencia', icon: '👥', roles: [UserRole.DOCENTE] },
     { id: 'activities', label: 'Actividades', icon: '📝', roles: [UserRole.DOCENTE, UserRole.ADMIN] },
     { id: 'analytics', label: 'Estadísticas', icon: '📊', roles: [UserRole.ADMIN] },
@@ -325,6 +327,7 @@ const App: React.FC = () => {
           {activeView === 'student-list' && <StudentListView role={currentRole} userId={userId} />}
           {activeView === 'groups' && <GroupView userId={userId} role={currentRole} />}
           {activeView === 'activities' && <ActivitiesModule userId={userId} role={currentRole} />}
+          {activeView === 'followup' && <TutoringFollowUpView userId={userId} role={currentRole} />}
           {activeView === 'admin' && <AdminPanel />}
           {activeView === 'analytics' && <AnalyticsView />}
         </div>

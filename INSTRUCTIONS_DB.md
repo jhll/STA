@@ -65,3 +65,14 @@ CREATE INDEX IF NOT EXISTS idx_estudiantes_ciclo ON estudiantes(ciclo_id);
 -- 7. Notificar recarga de esquema en PostgREST / Supabase
 NOTIFY pgrst, 'reload schema';
 ```
+
+---
+
+# Actualización para Acentuaciones de Especialidad (Semestres 7, 8 y 9) y Subgrupos de Optativa Libre
+
+Para habilitar la gestión y división de grupos en subgrupos de Optativa Libre y el catálogo de Acentuación de Especialidad para los semestres 7°, 8° y 9° de todas las carreras (QFB, IBQ, IQ, BG):
+
+1. Ve a **Supabase -> SQL Editor -> New Query**.
+2. Copia y ejecuta el archivo `schema_updates_acentuaciones_789.sql`.
+3. Esto asegurará las columnas `semestre`, `tipo`, `es_optativa` y poblará el catálogo oficial de materias y temas de acentuación para 7°, 8° y 9°.
+

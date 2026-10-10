@@ -2,11 +2,13 @@
 import React, { useState, useEffect } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend, Cell, PieChart, Pie } from 'recharts';
 import { supabase } from '../services/supabaseClient';
-import { UserRole, Student, RiskLevel } from '../types';
+import { UserRole, Student, RiskLevel, CicloEscolar } from '../types';
 import TeacherAnalytics from './TeacherAnalytics';
 
 const AnalyticsView: React.FC = () => {
   const [loading, setLoading] = useState(true);
+  const [cycles, setCycles] = useState<CicloEscolar[]>([]);
+  const [selectedCycleId, setSelectedCycleId] = useState<string>('ALL');
   const [riskData, setRiskData] = useState<any[]>([]);
   const [factorData, setFactorData] = useState<any[]>([]);
   const [trendData, setTrendData] = useState<any[]>([]);
@@ -14,20 +16,41 @@ const AnalyticsView: React.FC = () => {
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
 
+  const fetchCycles = async () => {
+    try {
+      const { data } = await supabase
+        .from('ciclos_escolares')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (data && data.length > 0) {
+        setCycles(data);
+      }
+    } catch (err) {
+      console.error("Error al cargar ciclos en AnalyticsView:", err);
+    }
+  };
+
   const fetchRealAnalytics = async () => {
     setLoading(true);
     try {
-      // 1. Obtener todos los estudiantes
-      const { data: students, error: studentError } = await supabase
-        .from('estudiantes')
-        .select('*');
+      fetchCycles();
+
+      // 1. Obtener estudiantes según el periodo seleccionado (o historial desde 2025-2026-2 al actual)
+      let studentQuery = supabase.from('estudiantes').select('*');
+      if (selectedCycleId !== 'ALL') {
+        studentQuery = studentQuery.or(`ciclo_id.eq.${selectedCycleId},ciclo_id.is.null`);
+      }
+      const { data: students, error: studentError } = await studentQuery;
 
       if (studentError) throw studentError;
 
-      // 2. Obtener todas las intervenciones para tendencias
-      const { data: interventions, error: intError } = await supabase
-        .from('intervenciones')
-        .select('fecha');
+      // 2. Obtener todas las intervenciones para tendencias según el periodo
+      let intQuery = supabase.from('intervenciones').select('fecha, ciclo_id');
+      if (selectedCycleId !== 'ALL') {
+        intQuery = intQuery.or(`ciclo_id.eq.${selectedCycleId},ciclo_id.is.null`);
+      }
+      const { data: interventions, error: intError } = await intQuery;
 
       if (intError) throw intError;
 
@@ -112,7 +135,7 @@ const AnalyticsView: React.FC = () => {
 
   useEffect(() => {
     fetchRealAnalytics();
-  }, []);
+  }, [selectedCycleId]);
 
   const downloadAttendanceReport = async () => {
     setIsDownloading(true);
@@ -131,7 +154,7 @@ const AnalyticsView: React.FC = () => {
       const totalCount = count || 1000;
 
       while (hasMore) {
-        const { data, error } = await supabase
+        let asistQuery = supabase
           .from('asistencias')
           .select(`
             presente,
@@ -141,10 +164,13 @@ const AnalyticsView: React.FC = () => {
             estudiantes(id, nombre),
             grupos(
               nombre_grupo,
+              ciclo_id,
               materias(nombre),
               docentes(nombre)
             )
-          `)
+          `);
+
+        const { data, error } = await asistQuery
           .range(page * pageSize, (page + 1) * pageSize - 1);
 
         if (error) throw error;
@@ -245,20 +271,43 @@ const AnalyticsView: React.FC = () => {
     return (
       <div className="max-w-7xl mx-auto p-4 md:p-8 flex flex-col items-center justify-center min-h-[60vh]">
         <div className="w-16 h-16 border-4 border-blue-100 border-t-blue-600 rounded-full animate-spin mb-4"></div>
-        <p className="text-gray-400 font-black uppercase text-[10px] tracking-widest">Compilando datos en tiempo real...</p>
+        <p className="text-gray-400 font-black uppercase text-[10px] tracking-widest">Compilando datos de analítica por periodo...</p>
       </div>
     );
   }
 
   return (
     <div className="max-w-7xl mx-auto p-4 md:p-8 space-y-8 animate-in fade-in duration-700">
-      <div className="flex flex-col md:flex-row justify-between items-end gap-4">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
         <div>
-          <h2 className="text-3xl font-black text-gray-900 tracking-tight">Módulo de Analítica</h2>
-          <p className="text-gray-500 font-medium">Información real extraída de la matrícula y registros de la FCQB.</p>
+          <div className="flex items-center gap-3">
+            <h2 className="text-3xl font-black text-gray-900 tracking-tight">Módulo de Analítica</h2>
+            <span className="bg-blue-50 text-[#003B5C] px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider border border-blue-100">
+              Histórico desde 2025-2026-2
+            </span>
+          </div>
+          <p className="text-gray-500 font-medium text-xs mt-1">Monitoreo de métricas, rendimiento y trayectoria por periodos académicos del ciclo escolar.</p>
         </div>
-        <div className="flex gap-2">
-          <button onClick={downloadAttendanceReport} disabled={isDownloading} className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-lg hover:bg-emerald-700 disabled:opacity-50 transition-all flex items-center gap-2 relative overflow-hidden">
+
+        <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+          {/* Selector de Ciclo / Periodo Histórico */}
+          <div className="flex items-center gap-2 bg-gray-50 p-1.5 rounded-2xl border border-gray-200">
+            <span className="text-xs ml-2">📅</span>
+            <select
+              value={selectedCycleId}
+              onChange={e => setSelectedCycleId(e.target.value)}
+              className="bg-white text-gray-900 text-xs font-black px-3 py-2 rounded-xl outline-none cursor-pointer border border-gray-200 hover:border-blue-500 shadow-sm transition-all"
+            >
+              <option value="ALL">HISTÓRICO GENERAL (2025-2026-2 AL ACTUAL)</option>
+              {cycles.map(c => (
+                <option key={c.id} value={c.id}>
+                  Periodo: {c.nombre} {c.es_activo ? '(Activo)' : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <button onClick={downloadAttendanceReport} disabled={isDownloading} className="bg-emerald-600 text-white px-4 py-2.5 rounded-2xl text-xs font-black uppercase tracking-wider shadow-lg hover:bg-emerald-700 disabled:opacity-50 transition-all flex items-center gap-2 relative overflow-hidden">
             {isDownloading && (
               <div
                 className="absolute top-0 left-0 h-full bg-emerald-800/30 transition-all duration-300"
@@ -268,8 +317,9 @@ const AnalyticsView: React.FC = () => {
             <span className="relative z-10">📥</span>
             <span className="relative z-10">{isDownloading ? `Generando... ${downloadProgress}%` : 'Reporte Asistencias'}</span>
           </button>
-          <button onClick={() => window.print()} className="bg-white border border-gray-200 text-gray-700 px-4 py-2 rounded-xl text-sm font-bold shadow-sm hover:bg-gray-50">Imprimir Reporte</button>
-          <button onClick={fetchRealAnalytics} className="bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-lg hover:bg-blue-700">Actualizar Datos</button>
+
+          <button onClick={() => window.print()} className="bg-white border border-gray-200 text-gray-700 px-4 py-2.5 rounded-2xl text-xs font-black uppercase tracking-wider shadow-sm hover:bg-gray-50 transition-all">Imprimir</button>
+          <button onClick={fetchRealAnalytics} className="bg-[#003B5C] text-white px-4 py-2.5 rounded-2xl text-xs font-black uppercase tracking-wider shadow-lg hover:bg-blue-900 transition-all">Refrescar</button>
         </div>
       </div>
 
@@ -390,7 +440,7 @@ const AnalyticsView: React.FC = () => {
       </div>
 
       {/* Teacher Analytics Section */}
-      <TeacherAnalytics />
+      <TeacherAnalytics selectedCycleId={selectedCycleId} />
     </div>
   );
 };

@@ -31,6 +31,7 @@ const Dashboard: React.FC<{ role: UserRole; userId: string }> = ({ role, userId 
       let teacherNormalGroups: string[] = [];
       let teacherExtraStudentIds: string[] = [];
       let isDocenteWithSubgroups = false;
+      let activeCycle: any = null;
 
       // Variables for Tutors
       let tutorNormalGroups: string[] = [];
@@ -60,8 +61,11 @@ const Dashboard: React.FC<{ role: UserRole; userId: string }> = ({ role, userId 
           if (tutorNormalGroups.length > 0) orConditions.push(`grupo.in.(${tutorNormalGroups.map(g => `"${g}"`).join(',')})`);
           if (tutorExtraStudentIds.length > 0) orConditions.push(`id.in.(${tutorExtraStudentIds.map(id => `"${id}"`).join(',')})`);
 
-          if (orConditions.length > 0) {
+          if (orConditions.length > 1) {
             query = query.or(orConditions.join(','));
+          } else if (orConditions.length === 1) {
+            if (tutorNormalGroups.length > 0) query = query.in('grupo', tutorNormalGroups);
+            if (tutorExtraStudentIds.length > 0) query = query.in('id', tutorExtraStudentIds);
           }
         } else {
           setStudents([]);
@@ -72,25 +76,33 @@ const Dashboard: React.FC<{ role: UserRole; userId: string }> = ({ role, userId 
         }
       }
 
-      // LÓGICA PARA DOCENTE (únicamente periodo del ciclo escolar activo)
+      // LÓGICA PARA DOCENTE (únicamente alumnos y grupos asignados del periodo activo)
       else if (role === UserRole.DOCENTE) {
-        const { data: activeCycle } = await supabase
+        const { data: cycleData } = await supabase
           .from('ciclos_escolares')
           .select('id')
           .eq('es_activo', true)
           .maybeSingle();
+        activeCycle = cycleData;
+
+        if (!activeCycle) {
+          setStudents([]);
+          setTotalEnrollment(0);
+          setTotalHighRisk(0);
+          setTotalMediumRisk(0);
+          setTotalLowRisk(0);
+          setLoading(false);
+          return;
+        }
 
         let groupsQuery = supabase
           .from('grupos')
           .select('nombre_grupo, ciclo_id')
-          .eq('docente_id', userId);
-
-        if (activeCycle) {
-          groupsQuery = groupsQuery.or(`ciclo_id.eq.${activeCycle.id},ciclo_id.is.null`);
-        }
+          .eq('docente_id', userId)
+          .eq('ciclo_id', activeCycle.id);
 
         const { data: groups } = await groupsQuery;
-        const groupNames = Array.from(new Set((groups || []).map(g => g.nombre_grupo)));
+        const groupNames: string[] = Array.from(new Set((groups || []).map((g: any) => g.nombre_grupo))).filter((g): g is string => typeof g === 'string');
 
         // Check for Accentuations Subgroups (convention: "SUB - <Nombre>")
         const subGroups = groupNames.filter(g => g.startsWith('SUB - '));
@@ -115,9 +127,15 @@ const Dashboard: React.FC<{ role: UserRole; userId: string }> = ({ role, userId 
         if (teacherNormalGroups.length === 0 && teacherExtraStudentIds.length === 0) {
           setStudents([]);
           setTotalEnrollment(0);
+          setTotalHighRisk(0);
+          setTotalMediumRisk(0);
+          setTotalLowRisk(0);
           setLoading(false);
           return;
         }
+
+        // Filtrar estrictamente por los alumnos asignados del periodo activo
+        query = query.eq('ciclo_id', activeCycle.id);
 
         const conditions: string[] = [];
         if (teacherNormalGroups.length > 0) conditions.push(`grupo.in.(${teacherNormalGroups.map(g => `"${g}"`).join(',')})`);
@@ -155,7 +173,7 @@ const Dashboard: React.FC<{ role: UserRole; userId: string }> = ({ role, userId 
           if (teacherExtraStudentIds.length > 0) conditions.push(`id.in.(${teacherExtraStudentIds.map(id => `"${id}"`).join(',')})`);
 
           if (activeCycle) {
-            q = q.or(`ciclo_id.eq.${activeCycle.id},ciclo_id.is.null`);
+            q = q.eq('ciclo_id', activeCycle.id);
           }
 
           if (conditions.length > 1) return q.or(conditions.join(','));
@@ -166,10 +184,10 @@ const Dashboard: React.FC<{ role: UserRole; userId: string }> = ({ role, userId 
           return q;
         }
         if (filterGroups.length > 0) {
-          if (activeCycle) q = q.or(`ciclo_id.eq.${activeCycle.id},ciclo_id.is.null`);
+          if (activeCycle) q = q.eq('ciclo_id', activeCycle.id);
           return q.in('grupo', filterGroups);
         }
-        if (activeCycle) q = q.or(`ciclo_id.eq.${activeCycle.id},ciclo_id.is.null`);
+        if (activeCycle) q = q.eq('ciclo_id', activeCycle.id);
         return q;
       };
 
@@ -254,8 +272,8 @@ const Dashboard: React.FC<{ role: UserRole; userId: string }> = ({ role, userId 
                   onClick={() => setShowTeacherCertificateModal(true)}
                   className="inline-flex items-center gap-3 bg-[#FFD100] text-[#003B5C] px-6 py-3.5 rounded-xl font-black text-xs uppercase tracking-widest hover:bg-white hover:shadow-2xl transition-all active:scale-95 border-2 border-transparent hover:border-[#FFD100] group shadow-lg"
                 >
-                  <span className="text-xl group-hover:rotate-12 transition-transform">📜</span>
-                  <span>Generar Constancia de Cumplimiento Docente</span>
+                  <span className="text-xl group-hover:rotate-12 transition-transform">📄</span>
+                  <span>Descargar Constancia PDF (2025-2026-2)</span>
                 </button>
               </div>
             )}

@@ -45,6 +45,8 @@ export interface Subject {
   carrera: Career;
   semestre: number;
   creditos: number;
+  tipo?: string;
+  es_optativa?: boolean;
   created_at?: string;
 }
 
