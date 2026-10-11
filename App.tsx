@@ -346,7 +346,7 @@ const App: React.FC = () => {
           {activeView === 'dashboard' && <Dashboard role={currentRole} userId={userId} userName={userName} />}
           {activeView === 'student-list' && <StudentListView role={currentRole} userId={userId} userName={userName} />}
           {activeView === 'groups' && <GroupView userId={userId} role={currentRole} userName={userName} />}
-          {activeView === 'activities' && <ActivitiesModule userId={userId} role={currentRole} />}
+          {activeView === 'activities' && <ActivitiesModule userId={userId} role={currentRole} userName={userName} />}
           {activeView === 'followup' && <TutoringFollowUpView userId={userId} role={currentRole} userName={userName} />}
           {activeView === 'admin' && <AdminPanel userId={userId} userName={userName} />}
           {activeView === 'analytics' && <AnalyticsView />}

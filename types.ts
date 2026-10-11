@@ -82,6 +82,10 @@ export interface Activity {
   puntos_max: number;
   created_at?: string;
   grupo_nombre?: string;
+  materia_nombre?: string;
+  docente_nombre?: string;
+  calificaciones?: any[];
+  ciclo_id?: string;
 }
 
 export interface Grade {
