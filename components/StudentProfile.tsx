@@ -232,7 +232,7 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, userId, 
     try {
       const { data, error } = await supabase
         .from('intervenciones')
-        .select(`*, docentes(nombre, email)`)
+        .select('*')
         .eq('estudiante_id', student.id)
         .order('fecha', { ascending: false });
       if (error) throw error;
@@ -427,14 +427,30 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, userId, 
 
     setIsSavingIntervention(true);
     try {
-      const { error } = await supabase.from('intervenciones').insert([{
+      let targetCycleId = student.ciclo_id;
+      if (!targetCycleId) {
+        const { data: actCycle } = await supabase
+          .from('ciclos_escolares')
+          .select('id')
+          .eq('es_activo', true)
+          .maybeSingle();
+        targetCycleId = actCycle?.id;
+      }
+
+      const payload = {
         estudiante_id: student.id,
         tipo_intervencion: newIntervention.type,
         descripcion: newIntervention.description.trim(),
         notas_adicionales: newIntervention.additionalNotes.trim(),
-        ciclo_id: student.ciclo_id,
-        estatus: newIntervention.estatus || 'COMPLETED'
-      }]);
+        ciclo_id: targetCycleId || null,
+        estatus: newIntervention.estatus || 'COMPLETED',
+        fecha: new Date().toISOString()
+      };
+
+      const { data: insertedRows, error } = await supabase
+        .from('intervenciones')
+        .insert([payload])
+        .select('*');
 
       if (error) throw error;
 
@@ -445,7 +461,13 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, userId, 
         additionalNotes: '',
         estatus: 'COMPLETED'
       });
-      fetchInterventions();
+      setInterventionStatusFilter('ALL');
+
+      if (insertedRows && insertedRows.length > 0) {
+        setInterventions(prev => [insertedRows[0], ...prev.filter(x => x.id !== insertedRows[0].id)]);
+      }
+
+      await fetchInterventions();
     } catch (err: any) {
       alert("Error al guardar intervención: " + err.message);
     } finally {
@@ -1750,7 +1772,7 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, userId, 
                               UAS
                             </span>
                             <span>
-                              Registrado por: <strong className="text-slate-900">{item.docentes?.nombre || 'Docente Tutor'}</strong>
+                              Tutor / Responsable: <strong className="text-slate-900">{assignedTutor?.nombre || 'Tutor Académico FCQB'}</strong>
                             </span>
                           </div>
 
@@ -2072,7 +2094,7 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, userId, 
                               </span>
                             </td>
                             <td className="p-2 border text-slate-600 whitespace-nowrap">
-                              {intv.docentes?.nombre || 'Tutor Responsable'}
+                              {assignedTutor?.nombre || 'Tutor Responsable'}
                             </td>
                           </tr>
                         );
