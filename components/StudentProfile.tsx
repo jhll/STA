@@ -244,55 +244,90 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, userId, 
     }
   };
 
-  // Cargar Asistencias
+  // Helper para obtener exclusivamente los grupos del ciclo activo que pertenecen al grupo del estudiante
+  const getStudentActiveCycleGroups = async () => {
+    // 1. Ciclo escolar activo
+    const { data: activeCycle } = await supabase
+      .from('ciclos_escolares')
+      .select('id, nombre')
+      .eq('es_activo', true)
+      .maybeSingle();
+
+    const targetCycleId = activeCycle?.id || student.ciclo_id;
+
+    // 2. Acentuaciones del estudiante si aplican
+    const { data: stAccData } = await supabase
+      .from('estudiantes_acentuacion')
+      .select('acentuaciones(nombre)')
+      .eq('estudiante_id', student.id);
+
+    const stAccNames = (stAccData || []).map((x: any) => {
+      const acc = getRelation(x.acentuaciones);
+      return acc ? `SUB - ${acc.nombre}` : null;
+    }).filter(Boolean);
+
+    // 3. Consultar grupos del ciclo activo
+    let gQuery = supabase
+      .from('grupos')
+      .select('id, nombre_grupo, ciclo_id, docente_id, materias(nombre)');
+
+    if (targetCycleId) {
+      gQuery = gQuery.eq('ciclo_id', targetCycleId);
+    }
+
+    const { data: allCycleGroups, error: groupsError } = await gQuery;
+    if (groupsError) throw groupsError;
+
+    const normalizeGroup = (str?: string) => (str || '').replace(/[\s\-_]/g, '').toUpperCase();
+    const studentNormGroup = normalizeGroup(student.group);
+
+    const matchingGroups = (allCycleGroups || []).filter(g => {
+      const normG = normalizeGroup(g.nombre_grupo);
+      const isMatch = normG === studentNormGroup || stAccNames.some(acc => normalizeGroup(acc) === normG);
+      if (!isMatch) return false;
+      if (role === UserRole.DOCENTE && userId) {
+        return g.docente_id === userId;
+      }
+      return true;
+    });
+
+    const groupMap: Record<string, string> = {};
+    matchingGroups.forEach(g => {
+      const mat = getRelation(g.materias);
+      groupMap[g.id] = `${g.nombre_grupo} - ${mat?.nombre || 'Materia'}`;
+    });
+
+    return {
+      groupIds: matchingGroups.map(g => g.id),
+      groupMap,
+      cycleName: activeCycle?.nombre || activeCycleName
+    };
+  };
+
+  // Cargar Asistencias (Únicamente ciclo activo y grupo del estudiante)
   const fetchDetailedAttendance = async () => {
     setLoadingDetailedAttendance(true);
     try {
-      let groupIds: string[] = [];
-      let groupMap: Record<string, string> = {};
+      const { groupIds, groupMap } = await getStudentActiveCycleGroups();
 
-      if (role === UserRole.DOCENTE && userId) {
-        const { data: groups } = await supabase
-          .from('grupos')
-          .select('id, nombre_grupo, materias(nombre)')
-          .eq('docente_id', userId);
-        if (!groups || groups.length === 0) {
-          setDetailedAttendance([]);
-          setLoadingDetailedAttendance(false);
-          return;
-        }
-        groupIds = groups.map(g => g.id);
-        groupMap = groups.reduce((acc: any, g: any) => {
-          acc[g.id] = `${g.nombre_grupo} - ${Array.isArray(g.materias) ? g.materias[0]?.nombre : g.materias?.nombre}`;
-          return acc;
-        }, {});
-      } else {
-        // ADMIN / TUTOR: Consulta todos los grupos asociados al estudiante
-        const { data: allGroups } = await supabase
-          .from('grupos')
-          .select('id, nombre_grupo, materias(nombre)');
-        (allGroups || []).forEach(g => {
-          groupMap[g.id] = `${g.nombre_grupo} - ${Array.isArray(g.materias) ? g.materias[0]?.nombre : g.materias?.nombre}`;
-        });
+      if (groupIds.length === 0) {
+        setDetailedAttendance([]);
+        return;
       }
 
-      let attQuery = supabase
+      const { data: attendanceData, error } = await supabase
         .from('asistencias')
         .select('*')
         .eq('estudiante_id', student.id)
+        .in('grupo_id', groupIds)
         .order('fecha', { ascending: false });
 
-      if (role === UserRole.DOCENTE && groupIds.length > 0) {
-        attQuery = attQuery.in('grupo_id', groupIds);
-      }
-
-      const { data: attendanceData, error } = await attQuery;
       if (error) throw error;
 
       setDetailedAttendance((attendanceData || []).map(a => ({
         fecha: a.fecha,
         presente: a.presente,
-        grupo: groupMap[a.grupo_id] || 'Grupo de Clase'
+        grupo: groupMap[a.grupo_id] || student.group
       })));
     } catch (err) {
       console.error("Error al obtener asistencia detallada:", err);
@@ -301,52 +336,27 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, userId, 
     }
   };
 
-  // Cargar Actividades
+  // Cargar Actividades (Únicamente ciclo activo y grupo del estudiante)
   const fetchDetailedActivities = async () => {
     setLoadingDetailedActivities(true);
     try {
-      let groupIds: string[] = [];
-      let groupMap: Record<string, string> = {};
+      const { groupIds, groupMap } = await getStudentActiveCycleGroups();
 
-      if (role === UserRole.DOCENTE && userId) {
-        const { data: groups } = await supabase
-          .from('grupos')
-          .select('id, nombre_grupo, materias(nombre)')
-          .eq('docente_id', userId);
-        if (!groups || groups.length === 0) {
-          setDetailedActivities([]);
-          setLoadingDetailedActivities(false);
-          return;
-        }
-        groupIds = groups.map(g => g.id);
-        groupMap = groups.reduce((acc: any, g: any) => {
-          acc[g.id] = `${g.nombre_grupo} - ${Array.isArray(g.materias) ? g.materias[0]?.nombre : g.materias?.nombre}`;
-          return acc;
-        }, {});
-      } else {
-        const { data: allGroups } = await supabase
-          .from('grupos')
-          .select('id, nombre_grupo, materias(nombre)');
-        (allGroups || []).forEach(g => {
-          groupMap[g.id] = `${g.nombre_grupo} - ${Array.isArray(g.materias) ? g.materias[0]?.nombre : g.materias?.nombre}`;
-        });
+      if (groupIds.length === 0) {
+        setDetailedActivities([]);
+        return;
       }
 
-      let actQuery = supabase
+      const { data: acts, error: actsError } = await supabase
         .from('actividades')
         .select('*')
+        .in('grupo_id', groupIds)
         .order('fecha_entrega', { ascending: false });
 
-      if (role === UserRole.DOCENTE && groupIds.length > 0) {
-        actQuery = actQuery.in('grupo_id', groupIds);
-      }
-
-      const { data: acts, error: actsError } = await actQuery;
       if (actsError) throw actsError;
 
       if (!acts || acts.length === 0) {
         setDetailedActivities([]);
-        setLoadingDetailedActivities(false);
         return;
       }
 
@@ -359,16 +369,14 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, userId, 
 
       if (gradesError) throw gradesError;
 
-      const detailed = acts
-        .map(act => {
-          const grade = grades?.find(g => g.actividad_id === act.id) || null;
-          return {
-            actividad: act,
-            grade: grade,
-            grupo_nombre: groupMap[act.grupo_id] || 'Asignatura Registrada'
-          };
-        })
-        .filter(item => (role === UserRole.DOCENTE ? true : item.grade !== null));
+      const detailed = acts.map(act => {
+        const grade = grades?.find(g => g.actividad_id === act.id) || null;
+        return {
+          actividad: act,
+          grade: grade,
+          grupo_nombre: groupMap[act.grupo_id] || student.group
+        };
+      });
 
       setDetailedActivities(detailed);
     } catch (err) {
@@ -1269,11 +1277,11 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, userId, 
                   <div>
                     <h3 className="text-base font-black text-[#003B5C]">Actividades, Tareas y Evaluaciones</h3>
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                      Desglose de entregas y calificaciones individuales
+                      Grupo {student.group} • Ciclo Activo: {activeCycleName}
                     </p>
                   </div>
-                  <span className="text-xs font-bold text-slate-500">
-                    {detailedActivities.length} Actividades
+                  <span className="text-xs font-bold text-[#003B5C] bg-blue-50 px-3 py-1 rounded-xl border border-blue-100">
+                    {detailedActivities.length} Actividades del Grupo
                   </span>
                 </div>
 
@@ -1293,13 +1301,13 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, userId, 
                       {loadingDetailedActivities ? (
                         <tr>
                           <td colSpan={role === UserRole.DOCENTE ? 6 : 5} className="py-12 text-center text-slate-400 font-bold animate-pulse text-xs">
-                            Cargando actividades y calificaciones...
+                            Cargando actividades del ciclo activo...
                           </td>
                         </tr>
                       ) : detailedActivities.length === 0 ? (
                         <tr>
                           <td colSpan={role === UserRole.DOCENTE ? 6 : 5} className="py-12 text-center text-slate-400 font-bold text-xs">
-                            Sin actividades registradas para este estudiante
+                            Sin actividades registradas para el grupo {student.group} en el ciclo activo ({activeCycleName})
                           </td>
                         </tr>
                       ) : (
@@ -1411,11 +1419,11 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, userId, 
                   <div>
                     <h3 className="text-base font-black text-[#003B5C]">Registro Diario de Asistencias</h3>
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                      Bitácora de asistencias y faltas por fecha
+                      Grupo {student.group} • Ciclo Activo: {activeCycleName}
                     </p>
                   </div>
-                  <span className="text-xs font-bold text-slate-500">
-                    {detailedAttendance.length} Registros
+                  <span className="text-xs font-bold text-[#003B5C] bg-blue-50 px-3 py-1 rounded-xl border border-blue-100">
+                    {detailedAttendance.length} Registros del Grupo
                   </span>
                 </div>
 
@@ -1432,13 +1440,13 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, userId, 
                       {loadingDetailedAttendance ? (
                         <tr>
                           <td colSpan={3} className="py-10 text-center text-slate-400 font-bold animate-pulse text-xs">
-                            Cargando asistencias...
+                            Cargando asistencias del ciclo activo...
                           </td>
                         </tr>
                       ) : detailedAttendance.length === 0 ? (
                         <tr>
                           <td colSpan={3} className="py-10 text-center text-slate-400 font-bold text-xs">
-                            Sin registros de asistencia documentados
+                            Sin asistencias registradas para el grupo {student.group} en el ciclo activo ({activeCycleName})
                           </td>
                         </tr>
                       ) : (
