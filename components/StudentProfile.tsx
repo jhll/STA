@@ -52,6 +52,8 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, userId, 
   const [loadingInterventions, setLoadingInterventions] = useState(false);
   const [showAddIntervention, setShowAddIntervention] = useState(false);
   const [isSavingIntervention, setIsSavingIntervention] = useState(false);
+  const [interventionStatusFilter, setInterventionStatusFilter] = useState<'ALL' | 'COMPLETED' | 'IN_PROGRESS' | 'PENDING'>('ALL');
+  const [updatingInterventionId, setUpdatingInterventionId] = useState<string | null>(null);
   const [newIntervention, setNewIntervention] = useState({
     type: 'Asesoría Académica',
     description: '',
@@ -549,6 +551,114 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, userId, 
         return 'bg-slate-50 text-slate-800 border-slate-200';
     }
   };
+
+  const getStatusConfig = (statusRaw?: string) => {
+    const status = (statusRaw || 'COMPLETED').toUpperCase();
+    switch (status) {
+      case 'COMPLETED':
+      case 'ATENDIDA':
+      case 'COMPLETADA':
+        return {
+          key: 'COMPLETED',
+          label: 'Completada / Atendida',
+          shortLabel: 'Completada',
+          icon: '✓',
+          badgeClass: 'bg-emerald-50 text-emerald-800 border-emerald-300 ring-emerald-500/10',
+          dotClass: 'bg-emerald-500',
+          cardBorder: 'border-l-emerald-600',
+          textColor: 'text-emerald-700'
+        };
+      case 'IN_PROGRESS':
+      case 'EN_PROCESO':
+      case 'EN SEGUIMIENTO':
+        return {
+          key: 'IN_PROGRESS',
+          label: 'En Seguimiento Activo',
+          shortLabel: 'En Seguimiento',
+          icon: '⏳',
+          badgeClass: 'bg-amber-50 text-amber-900 border-amber-300 ring-amber-500/10',
+          dotClass: 'bg-amber-500',
+          cardBorder: 'border-l-amber-500',
+          textColor: 'text-amber-700'
+        };
+      case 'PENDING':
+      case 'PENDIENTE':
+        return {
+          key: 'PENDING',
+          label: 'Pendiente de Cita',
+          shortLabel: 'Pendiente',
+          icon: '⏱️',
+          badgeClass: 'bg-indigo-50 text-indigo-900 border-indigo-300 ring-indigo-500/10',
+          dotClass: 'bg-indigo-500',
+          cardBorder: 'border-l-indigo-600',
+          textColor: 'text-indigo-700'
+        };
+      case 'CANCELLED':
+      case 'CANCELADA':
+        return {
+          key: 'CANCELLED',
+          label: 'Cancelada',
+          shortLabel: 'Cancelada',
+          icon: '✕',
+          badgeClass: 'bg-slate-50 text-slate-700 border-slate-300 ring-slate-500/10',
+          dotClass: 'bg-slate-400',
+          cardBorder: 'border-l-slate-400',
+          textColor: 'text-slate-600'
+        };
+      default:
+        return {
+          key: status,
+          label: statusRaw || 'Completada',
+          shortLabel: statusRaw || 'Completada',
+          icon: '●',
+          badgeClass: 'bg-blue-50 text-blue-900 border-blue-300 ring-blue-500/10',
+          dotClass: 'bg-blue-500',
+          cardBorder: 'border-l-[#003B5C]',
+          textColor: 'text-blue-700'
+        };
+    }
+  };
+
+  const handleUpdateInterventionStatus = async (interventionId: string, newStatus: string) => {
+    setUpdatingInterventionId(interventionId);
+    try {
+      const { error } = await supabase
+        .from('intervenciones')
+        .update({ estatus: newStatus })
+        .eq('id', interventionId);
+
+      if (error) throw error;
+
+      setInterventions(prev =>
+        prev.map(item => (item.id === interventionId ? { ...item, estatus: newStatus } : item))
+      );
+    } catch (err: any) {
+      alert("Error al actualizar estatus de intervención: " + err.message);
+    } finally {
+      setUpdatingInterventionId(null);
+    }
+  };
+
+  const countCompleted = interventions.filter(i => {
+    const s = (i.estatus || 'COMPLETED').toUpperCase();
+    return s === 'COMPLETED' || s === 'ATENDIDA' || s === 'COMPLETADA';
+  }).length;
+
+  const countInProgress = interventions.filter(i => {
+    const s = (i.estatus || '').toUpperCase();
+    return s === 'IN_PROGRESS' || s === 'EN_PROCESO' || s === 'EN SEGUIMIENTO';
+  }).length;
+
+  const countPending = interventions.filter(i => {
+    const s = (i.estatus || '').toUpperCase();
+    return s === 'PENDING' || s === 'PENDIENTE';
+  }).length;
+
+  const filteredInterventions = interventions.filter(item => {
+    if (interventionStatusFilter === 'ALL') return true;
+    const cfg = getStatusConfig(item.estatus);
+    return cfg.key === interventionStatusFilter;
+  });
 
   const approvedCourses = academicHistory.filter(h => h.promedio >= 7.0).length;
   const isRegular = academicHistory.length === 0 || approvedCourses === academicHistory.length;
@@ -1373,17 +1483,94 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, userId, 
                     <span>🛠️</span> Bitácora de Acompañamiento y Tutoría
                   </h3>
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-0.5">
-                    Registro de acciones preventivas, acuerdos y seguimiento tutorial
+                    Registro de intervenciones, acuerdos y seguimiento del estatus tutorial
                   </p>
                 </div>
                 {!showAddIntervention && (
                   <button
                     onClick={() => setShowAddIntervention(true)}
-                    className="bg-[#003B5C] text-white px-5 py-2.5 rounded-2xl text-xs font-black uppercase tracking-wider hover:bg-blue-800 transition-all shadow-md active:scale-95"
+                    className="bg-[#003B5C] text-white px-5 py-2.5 rounded-2xl text-xs font-black uppercase tracking-wider hover:bg-blue-800 transition-all shadow-md active:scale-95 flex items-center gap-2"
                   >
-                    + Nueva Intervención
+                    <span>+</span>
+                    <span>Nueva Intervención</span>
                   </button>
                 )}
+              </div>
+
+              {/* FILTROS Y RESUMEN DE ESTATUS DE INTERVENCIONES */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setInterventionStatusFilter('ALL')}
+                  className={`p-4 rounded-2xl border text-left transition-all flex flex-col justify-between cursor-pointer ${
+                    interventionStatusFilter === 'ALL'
+                      ? 'bg-[#003B5C] text-white border-[#003B5C] shadow-md ring-2 ring-[#003B5C]/20'
+                      : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                  }`}
+                >
+                  <span className="text-[9px] font-black uppercase tracking-wider opacity-75">Todas</span>
+                  <div className="flex items-baseline justify-between mt-2">
+                    <span className="text-2xl font-black">{interventions.length}</span>
+                    <span className="text-[10px] font-bold opacity-60">registros</span>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setInterventionStatusFilter('COMPLETED')}
+                  className={`p-4 rounded-2xl border text-left transition-all flex flex-col justify-between cursor-pointer ${
+                    interventionStatusFilter === 'COMPLETED'
+                      ? 'bg-emerald-700 text-white border-emerald-700 shadow-md ring-2 ring-emerald-500/20'
+                      : 'bg-white text-emerald-900 border-emerald-200 hover:bg-emerald-50/50'
+                  }`}
+                >
+                  <span className="text-[9px] font-black uppercase tracking-wider opacity-85 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                    <span>Completadas</span>
+                  </span>
+                  <div className="flex items-baseline justify-between mt-2">
+                    <span className="text-2xl font-black">{countCompleted}</span>
+                    <span className="text-[10px] font-bold opacity-75">atendidas</span>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setInterventionStatusFilter('IN_PROGRESS')}
+                  className={`p-4 rounded-2xl border text-left transition-all flex flex-col justify-between cursor-pointer ${
+                    interventionStatusFilter === 'IN_PROGRESS'
+                      ? 'bg-amber-600 text-white border-amber-600 shadow-md ring-2 ring-amber-500/20'
+                      : 'bg-white text-amber-900 border-amber-200 hover:bg-amber-50/50'
+                  }`}
+                >
+                  <span className="text-[9px] font-black uppercase tracking-wider opacity-85 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+                    <span>En Seguimiento</span>
+                  </span>
+                  <div className="flex items-baseline justify-between mt-2">
+                    <span className="text-2xl font-black">{countInProgress}</span>
+                    <span className="text-[10px] font-bold opacity-75">activas</span>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setInterventionStatusFilter('PENDING')}
+                  className={`p-4 rounded-2xl border text-left transition-all flex flex-col justify-between cursor-pointer ${
+                    interventionStatusFilter === 'PENDING'
+                      ? 'bg-indigo-700 text-white border-indigo-700 shadow-md ring-2 ring-indigo-500/20'
+                      : 'bg-white text-indigo-900 border-indigo-200 hover:bg-indigo-50/50'
+                  }`}
+                >
+                  <span className="text-[9px] font-black uppercase tracking-wider opacity-85 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-indigo-400"></span>
+                    <span>Pendientes</span>
+                  </span>
+                  <div className="flex items-baseline justify-between mt-2">
+                    <span className="text-2xl font-black">{countPending}</span>
+                    <span className="text-[10px] font-bold opacity-75">por atender</span>
+                  </div>
+                </button>
               </div>
 
               {/* Formulario Nueva Intervención */}
@@ -1429,9 +1616,9 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, userId, 
                         onChange={e => setNewIntervention({ ...newIntervention, estatus: e.target.value })}
                         className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-[#003B5C]/20"
                       >
-                        <option value="COMPLETED">Completada / Atendida</option>
-                        <option value="IN_PROGRESS">En Seguimiento Activo</option>
-                        <option value="PENDING">Pendiente de Cita</option>
+                        <option value="COMPLETED">✓ Completada / Atendida</option>
+                        <option value="IN_PROGRESS">⏳ En Seguimiento Activo</option>
+                        <option value="PENDING">⏱️ Pendiente de Cita</option>
                       </select>
                     </div>
 
@@ -1480,62 +1667,106 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, userId, 
                 </div>
               )}
 
-              {/* Lista Cronológica de Intervenciones */}
+              {/* Lista Cronológica de Intervenciones con Estatus */}
               <div className="space-y-4">
                 {loadingInterventions ? (
                   <div className="text-center py-16 text-slate-400 font-bold text-xs animate-pulse">
                     Accediendo a la bitácora institucional...
                   </div>
-                ) : interventions.length === 0 ? (
+                ) : filteredInterventions.length === 0 ? (
                   <div className="bg-white p-12 rounded-3xl border border-slate-200 text-center">
                     <span className="text-4xl block mb-2">📖</span>
-                    <p className="text-slate-500 font-bold text-sm">Sin intervenciones registradas para este estudiante</p>
+                    <p className="text-slate-500 font-bold text-sm">
+                      {interventions.length === 0
+                        ? 'Sin intervenciones registradas para este estudiante'
+                        : `No hay intervenciones con el estatus "${interventionStatusFilter}"`}
+                    </p>
                     <p className="text-slate-400 text-xs mt-1">
-                      Utilice el botón "Nueva Intervención" para registrar la primera sesión de tutoría.
+                      {interventions.length === 0
+                        ? 'Utilice el botón "+ Nueva Intervención" para registrar la primera sesión de tutoría.'
+                        : 'Cambie el filtro de estatus para ver otros registros.'}
                     </p>
                   </div>
                 ) : (
-                  interventions.map((item, idx) => (
-                    <div
-                      key={idx}
-                      className="bg-white p-6 rounded-3xl border border-slate-200 shadow-xs hover:shadow-md transition-all border-l-6 border-l-[#003B5C]"
-                    >
-                      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-                        <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-wider border ${getTypeBadgeClass(item.tipo_intervencion)}`}>
-                          {item.tipo_intervencion}
-                        </span>
-                        <div className="flex items-center gap-2 text-slate-400 text-[10px] font-bold">
-                          <span>📅 {new Date(item.fecha).toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
-                          <span>•</span>
-                          <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-black">
-                            {item.estatus || 'COMPLETED'}
+                  filteredInterventions.map((item, idx) => {
+                    const statusCfg = getStatusConfig(item.estatus);
+                    return (
+                      <div
+                        key={item.id || idx}
+                        className={`bg-white p-6 sm:p-7 rounded-3xl border border-slate-200 shadow-xs hover:shadow-md transition-all border-l-6 ${statusCfg.cardBorder}`}
+                      >
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 pb-3 border-b border-slate-100">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-wider border ${getTypeBadgeClass(item.tipo_intervencion)}`}>
+                              {item.tipo_intervencion}
+                            </span>
+                            <span className="text-slate-300 text-xs">•</span>
+                            <span className="text-slate-500 text-[11px] font-bold">
+                              📅 {new Date(item.fecha).toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })}
+                            </span>
+                          </div>
+
+                          {/* BADGE DE ESTATUS VISIBLE Y DESTACADO */}
+                          <div className="flex items-center gap-2 self-start sm:self-auto">
+                            <div className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider border shadow-xs ${statusCfg.badgeClass}`}>
+                              <span className={`w-2 h-2 rounded-full ${statusCfg.dotClass}`}></span>
+                              <span>{statusCfg.label}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Descripción / Minuta */}
+                        <div className="mb-4">
+                          <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider block mb-1">
+                            Minuta de Acuerdos y Situación:
                           </span>
+                          <p className="text-slate-800 font-semibold text-sm leading-relaxed">
+                            {item.description || item.descripcion}
+                          </p>
+                        </div>
+
+                        {/* Notas Adicionales */}
+                        {item.notas_adicionales && (
+                          <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200/80 text-xs text-slate-700 mb-4">
+                            <strong className="text-slate-900 font-black block text-[9px] uppercase tracking-wider mb-0.5">
+                              📌 Observación o Compromiso Adicional:
+                            </strong>
+                            {item.notas_adicionales}
+                          </div>
+                        )}
+
+                        {/* Footer con Tutor y Cambiador de Estatus */}
+                        <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                          <div className="flex items-center gap-2 text-slate-600 font-medium">
+                            <span className="w-6 h-6 rounded-full bg-[#003B5C] text-white flex items-center justify-center font-black text-[9px]">
+                              UAS
+                            </span>
+                            <span>
+                              Registrado por: <strong className="text-slate-900">{item.docentes?.nombre || 'Docente Tutor'}</strong>
+                            </span>
+                          </div>
+
+                          {/* Selector de Actualización de Estatus */}
+                          <div className="flex items-center gap-2 self-end sm:self-auto">
+                            <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider">
+                              Actualizar Estatus:
+                            </label>
+                            <select
+                              value={(item.estatus || 'COMPLETED').toUpperCase()}
+                              disabled={updatingInterventionId === item.id}
+                              onChange={e => handleUpdateInterventionStatus(item.id, e.target.value)}
+                              className="bg-slate-50 hover:bg-slate-100 border border-slate-300 text-slate-800 text-[10px] font-black uppercase rounded-xl px-3 py-1.5 outline-none transition-all cursor-pointer disabled:opacity-50 focus:ring-2 focus:ring-[#003B5C]/20"
+                            >
+                              <option value="COMPLETED">✓ Completada / Atendida</option>
+                              <option value="IN_PROGRESS">⏳ En Seguimiento Activo</option>
+                              <option value="PENDING">⏱️ Pendiente de Cita</option>
+                              <option value="CANCELLED">✕ Cancelada</option>
+                            </select>
+                          </div>
                         </div>
                       </div>
-
-                      <p className="text-slate-800 font-medium text-sm leading-relaxed mb-4">
-                        {item.description || item.descripcion}
-                      </p>
-
-                      {item.notas_adicionales && (
-                        <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 text-xs text-slate-600 font-normal mb-3">
-                          <strong className="text-slate-800 font-bold block text-[10px] uppercase">Nota adicional:</strong>
-                          {item.notas_adicionales}
-                        </div>
-                      )}
-
-                      <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-                        <div className="flex items-center gap-2">
-                          <span className="w-6 h-6 rounded-full bg-[#003B5C] text-white flex items-center justify-center font-black text-[9px]">
-                            UAS
-                          </span>
-                          <span className="font-bold text-slate-700">
-                            {item.docentes?.nombre || 'Docente Tutor Responsable'}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </div>
@@ -1792,23 +2023,54 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, userId, 
                 </table>
               </div>
 
-              {/* Bitácora de Intervenciones Recientes */}
+              {/* Bitácora de Intervenciones y Estatus Tutorial */}
               {interventions.length > 0 && (
                 <div>
                   <h4 className="text-xs font-black uppercase tracking-wider text-[#003B5C] mb-2 pb-1 border-b border-slate-200">
-                    Intervenciones de Tutoría Registradas ({interventions.length})
+                    Bitácora de Intervenciones y Estatus Tutorial ({interventions.length})
                   </h4>
-                  <div className="space-y-2">
-                    {interventions.slice(0, 3).map((intv, i) => (
-                      <div key={i} className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs">
-                        <div className="flex justify-between font-bold text-slate-700 mb-1">
-                          <span>{intv.tipo_intervencion}</span>
-                          <span className="text-[10px] text-slate-400">{new Date(intv.fecha).toLocaleDateString()}</span>
-                        </div>
-                        <p className="text-slate-600 font-normal">{intv.description || intv.descripcion}</p>
-                      </div>
-                    ))}
-                  </div>
+                  <table className="w-full text-xs text-left border border-slate-200">
+                    <thead className="bg-slate-100 text-[9px] font-black uppercase text-slate-600">
+                      <tr>
+                        <th className="p-2 border">Fecha</th>
+                        <th className="p-2 border">Tipo / Eje</th>
+                        <th className="p-2 border">Acuerdos / Minuta</th>
+                        <th className="p-2 border text-center">Estatus</th>
+                        <th className="p-2 border">Docente / Tutor</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {interventions.map((intv, i) => {
+                        const cfg = getStatusConfig(intv.estatus);
+                        return (
+                          <tr key={i} className="border">
+                            <td className="p-2 border font-medium whitespace-nowrap">
+                              {new Date(intv.fecha).toLocaleDateString()}
+                            </td>
+                            <td className="p-2 border font-bold text-slate-800 whitespace-nowrap">
+                              {intv.tipo_intervencion}
+                            </td>
+                            <td className="p-2 border font-normal text-slate-700">
+                              {intv.description || intv.descripcion}
+                              {intv.notas_adicionales && (
+                                <span className="block text-[10px] text-slate-500 italic mt-0.5">
+                                  Nota: {intv.notas_adicionales}
+                                </span>
+                              )}
+                            </td>
+                            <td className="p-2 border text-center font-bold whitespace-nowrap">
+                              <span className={`inline-block px-2 py-0.5 rounded text-[8px] font-black uppercase ${cfg.badgeClass}`}>
+                                {cfg.shortLabel}
+                              </span>
+                            </td>
+                            <td className="p-2 border text-slate-600 whitespace-nowrap">
+                              {intv.docentes?.nombre || 'Tutor Responsable'}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               )}
 
