@@ -70,6 +70,16 @@ const App: React.FC = () => {
     setUserId(id);
     setIsAuthenticated(true);
     setActiveView('dashboard');
+    try {
+      sessionStorage.setItem('sta_current_user_name', name);
+      sessionStorage.setItem('sta_current_user_id', id);
+      sessionStorage.setItem('sta_current_user_role', role);
+      localStorage.setItem('sta_current_user_name', name);
+      localStorage.setItem('sta_current_user_id', id);
+      localStorage.setItem('sta_current_user_role', role);
+    } catch (e) {
+      console.warn("Error guardando sesión local:", e);
+    }
   };
 
   const handleLogout = () => {
@@ -78,6 +88,16 @@ const App: React.FC = () => {
     setUserId('');
     setIsMenuOpen(false);
     setActiveCycle(null);
+    try {
+      sessionStorage.removeItem('sta_current_user_name');
+      sessionStorage.removeItem('sta_current_user_id');
+      sessionStorage.removeItem('sta_current_user_role');
+      localStorage.removeItem('sta_current_user_name');
+      localStorage.removeItem('sta_current_user_id');
+      localStorage.removeItem('sta_current_user_role');
+    } catch (e) {
+      console.warn("Error limpiando sesión local:", e);
+    }
   };
 
   const handleUpdatePassword = async (e: React.FormEvent) => {
@@ -323,12 +343,12 @@ const App: React.FC = () => {
 
         {/* Renderizado de Vistas */}
         <div className="p-4 md:p-0">
-          {activeView === 'dashboard' && <Dashboard role={currentRole} userId={userId} />}
-          {activeView === 'student-list' && <StudentListView role={currentRole} userId={userId} />}
-          {activeView === 'groups' && <GroupView userId={userId} role={currentRole} />}
+          {activeView === 'dashboard' && <Dashboard role={currentRole} userId={userId} userName={userName} />}
+          {activeView === 'student-list' && <StudentListView role={currentRole} userId={userId} userName={userName} />}
+          {activeView === 'groups' && <GroupView userId={userId} role={currentRole} userName={userName} />}
           {activeView === 'activities' && <ActivitiesModule userId={userId} role={currentRole} />}
-          {activeView === 'followup' && <TutoringFollowUpView userId={userId} role={currentRole} />}
-          {activeView === 'admin' && <AdminPanel />}
+          {activeView === 'followup' && <TutoringFollowUpView userId={userId} role={currentRole} userName={userName} />}
+          {activeView === 'admin' && <AdminPanel userId={userId} userName={userName} />}
           {activeView === 'analytics' && <AnalyticsView />}
         </div>
       </main>

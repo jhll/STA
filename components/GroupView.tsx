@@ -12,7 +12,7 @@ interface TeacherGroup {
   materias: any;
 }
 
-const GroupView: React.FC<{ userId: string; role: UserRole }> = ({ userId, role }) => {
+const GroupView: React.FC<{ userId: string; role: UserRole; userName?: string }> = ({ userId, role, userName }) => {
   const [assignedGroups, setAssignedGroups] = useState<TeacherGroup[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState<string>('');
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
@@ -793,6 +793,7 @@ const GroupView: React.FC<{ userId: string; role: UserRole }> = ({ userId, role 
           student={selectedStudent}
           role={role}
           userId={userId}
+          userName={userName}
           onClose={() => setSelectedStudent(null)}
         />
       )}

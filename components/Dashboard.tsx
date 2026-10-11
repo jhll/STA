@@ -10,7 +10,7 @@ import { supabase } from '../services/supabaseClient';
 import uasEscudo from './images/uas_escudo.png';
 import fcqbLogo from './images/fcqb_logo.png';
 
-const Dashboard: React.FC<{ role: UserRole; userId: string }> = ({ role, userId }) => {
+const Dashboard: React.FC<{ role: UserRole; userId: string; userName?: string }> = ({ role, userId, userName }) => {
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [showTeacherCertificateModal, setShowTeacherCertificateModal] = useState(false);
   const [students, setStudents] = useState<Student[]>([]);
@@ -374,7 +374,7 @@ const Dashboard: React.FC<{ role: UserRole; userId: string }> = ({ role, userId 
         </div>
       </div>
 
-      {selectedStudent && <StudentProfile student={selectedStudent} role={role} userId={userId} onClose={() => setSelectedStudent(null)} />}
+      {selectedStudent && <StudentProfile student={selectedStudent} role={role} userId={userId} userName={userName} onClose={() => setSelectedStudent(null)} />}
       
       {showTeacherCertificateModal && (
         <TeacherCertificateModal userId={userId} onClose={() => setShowTeacherCertificateModal(false)} />

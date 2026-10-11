@@ -10,6 +10,7 @@ interface StudentProfileProps {
   student: Student;
   role: UserRole;
   userId?: string;
+  userName?: string;
   onClose: () => void;
 }
 
@@ -26,7 +27,7 @@ interface AssignedTutor {
   email: string;
 }
 
-const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, userId, onClose }) => {
+const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, userId, userName, onClose }) => {
   const [activeTab, setActiveTab] = useState<'info' | 'academic' | 'attendance_activities' | 'interventions' | 'ai'>('info');
   
   // Datos complementarios del estudiante
@@ -61,8 +62,20 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, userId, 
     estatus: 'COMPLETED'
   });
 
+  // Obtener nombre de la sesión activa
+  const getSessionUserName = () => {
+    if (userName && userName.trim()) return userName.trim();
+    try {
+      const sessionName = sessionStorage.getItem('sta_current_user_name') || localStorage.getItem('sta_current_user_name');
+      if (sessionName && sessionName.trim()) return sessionName.trim();
+    } catch (e) {
+      // Ignorar error de acceso a storage
+    }
+    return '';
+  };
+
   // Autor de la intervención (Docente / Tutor)
-  const [currentAuthorName, setCurrentAuthorName] = useState<string>('');
+  const [currentAuthorName, setCurrentAuthorName] = useState<string>(() => getSessionUserName());
   const [currentDocenteId, setCurrentDocenteId] = useState<string | null>(null);
 
   // Historial Académico
@@ -140,8 +153,13 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, userId, 
     fetchInterventions();
   }, [student.id]);
 
-  // Obtener nombre del docente/tutor autenticado
+  // Obtener nombre del docente/tutor autenticado desde la sesión o tabla docentes
   useEffect(() => {
+    const sessionUser = getSessionUserName();
+    if (sessionUser) {
+      setCurrentAuthorName(sessionUser);
+    }
+
     const fetchAuthorInfo = async () => {
       if (userId) {
         try {
@@ -161,10 +179,12 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, userId, 
       }
     };
     fetchAuthorInfo();
-  }, [userId]);
+  }, [userId, userName]);
 
   const getEffectiveAuthorName = () => {
-    if (currentAuthorName) return currentAuthorName;
+    if (currentAuthorName && currentAuthorName.trim()) return currentAuthorName.trim();
+    const sessionUser = getSessionUserName();
+    if (sessionUser) return sessionUser;
     if (role === UserRole.TUTOR && assignedTutor?.nombre) return assignedTutor.nombre;
     if (role === UserRole.ADMIN) return 'Administración Escolar / Tutoría';
     if (assignedTutor?.nombre) return assignedTutor.nombre;
@@ -472,7 +492,7 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, userId, 
         targetCycleId = actCycle?.id;
       }
 
-      const authorName = getEffectiveAuthorName();
+      const authorName = (currentAuthorName && currentAuthorName.trim()) ? currentAuthorName.trim() : getEffectiveAuthorName();
       const authorDocenteId = currentDocenteId || (assignedTutor?.id || null);
 
       const fullPayload = {
@@ -1724,18 +1744,30 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, userId, 
                     </div>
 
                     <div className="sm:col-span-2">
-                      <label className="block text-[10px] font-black uppercase text-slate-400 tracking-wider mb-1">
-                        Docente / Tutor Responsable (Asignado Automáticamente)
-                      </label>
-                      <div className="w-full bg-slate-100/80 border border-slate-200 rounded-xl px-4 py-2.5 text-xs font-bold text-slate-800 flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-xs"></span>
-                          <span>{getEffectiveAuthorName()}</span>
-                        </div>
-                        <span className="text-[9px] font-black uppercase tracking-wider text-[#003B5C] bg-blue-100/70 border border-blue-200 px-2.5 py-0.5 rounded-full">
-                          Autor Automático
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="block text-[10px] font-black uppercase text-slate-500 tracking-wider">
+                          Docente / Tutor que realiza la Intervención
+                        </label>
+                        <span className="text-[9px] font-black uppercase tracking-wider text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 shadow-xs">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                          <span>Sesión Abierta: {getEffectiveAuthorName()}</span>
                         </span>
                       </div>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={currentAuthorName || getEffectiveAuthorName()}
+                          onChange={e => setCurrentAuthorName(e.target.value)}
+                          placeholder="Nombre del docente o tutor responsable..."
+                          className="w-full bg-slate-50 border border-slate-200 focus:border-[#003B5C] rounded-xl px-4 py-2.5 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-[#003B5C]/20 transition-all pl-9"
+                        />
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs">
+                          👤
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 font-medium mt-1">
+                        Asignado automáticamente con el nombre de la sesión activa (puedes ajustar el nombre si lo requieres).
+                      </p>
                     </div>
 
                     <div className="sm:col-span-2">

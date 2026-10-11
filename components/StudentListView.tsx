@@ -4,7 +4,7 @@ import { Student, RiskLevel, UserRole, ActivityType } from '../types';
 import { supabase } from '../services/supabaseClient';
 import StudentProfile from './StudentProfile';
 
-const StudentListView: React.FC<{ role: UserRole; userId: string }> = ({ role, userId }) => {
+const StudentListView: React.FC<{ role: UserRole; userId: string; userName?: string }> = ({ role, userId, userName }) => {
   const [students, setStudents] = useState<Student[]>([]);
   const [totalCount, setTotalCount] = useState<number>(0);
   const [loading, setLoading] = useState(false);
@@ -1127,6 +1127,7 @@ const StudentListView: React.FC<{ role: UserRole; userId: string }> = ({ role, u
           student={selectedStudent}
           role={role}
           userId={userId}
+          userName={userName}
           onClose={() => setSelectedStudent(null)}
         />
       )}

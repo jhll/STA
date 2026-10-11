@@ -68,7 +68,7 @@ const getActionTypeColor = (type: string) => {
   }
 };
 
-const TutoringFollowUpView: React.FC<{ userId: string; role: UserRole }> = ({ userId, role }) => {
+const TutoringFollowUpView: React.FC<{ userId: string; role: UserRole; userName?: string }> = ({ userId, role, userName }) => {
   const [loading, setLoading] = useState(true);
   const [activeCycleName, setActiveCycleName] = useState<string>('');
   const [activeCycleId, setActiveCycleId] = useState<string>('');
@@ -1336,6 +1336,7 @@ const TutoringFollowUpView: React.FC<{ userId: string; role: UserRole }> = ({ us
           student={selectedStudentForProfile}
           role={role}
           userId={userId}
+          userName={userName || tutorName}
           onClose={() => setSelectedStudentForProfile(null)}
         />
       )}

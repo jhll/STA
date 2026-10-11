@@ -11,7 +11,7 @@ import AccentuationsModule from './AccentuationsModule';
 import DatabaseBackup from './DatabaseBackup';
 import { getConfig, saveConfig, clearConfig } from '../services/configService';
 
-const AdminPanel: React.FC = () => {
+const AdminPanel: React.FC<{ userId?: string; userName?: string }> = ({ userId, userName }) => {
   const [activeTab, setActiveTab] = useState<'users' | 'ciclos' | 'subjects' | 'students' | 'assignments' | 'tutor-assignments' | 'accentuations' | 'config' | 'backups'>('users');
   const [showCsvModal, setShowCsvModal] = useState(false);
   const [showGroupModal, setShowGroupModal] = useState(false);
@@ -3092,7 +3092,15 @@ const AdminPanel: React.FC = () => {
         </div>
       )}
 
-      {selectedStudent && <StudentProfile student={selectedStudent} role={UserRole.ADMIN} onClose={() => setSelectedStudent(null)} />}
+      {selectedStudent && (
+        <StudentProfile
+          student={selectedStudent}
+          role={UserRole.ADMIN}
+          userId={userId}
+          userName={userName}
+          onClose={() => setSelectedStudent(null)}
+        />
+      )}
     </div>
   );
 };
