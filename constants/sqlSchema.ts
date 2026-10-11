@@ -123,6 +123,8 @@ CREATE TABLE intervenciones (
     descripcion TEXT NOT NULL,
     notas_adicionales TEXT,
     ciclo_id UUID REFERENCES ciclos_escolares(id),
+    nombre_docente TEXT,
+    docente_id UUID REFERENCES docentes(id) ON DELETE SET NULL,
     fecha TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     estatus TEXT DEFAULT 'COMPLETED'
 );

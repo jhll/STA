@@ -61,6 +61,10 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, userId, 
     estatus: 'COMPLETED'
   });
 
+  // Autor de la intervención (Docente / Tutor)
+  const [currentAuthorName, setCurrentAuthorName] = useState<string>('');
+  const [currentDocenteId, setCurrentDocenteId] = useState<string | null>(null);
+
   // Historial Académico
   const [academicHistory, setAcademicHistory] = useState<AcademicRecord[]>([]);
   const [cycleTrajectoryRecords, setCycleTrajectoryRecords] = useState<any[]>([]);
@@ -135,6 +139,37 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, userId, 
     fetchRealAcademicHistory();
     fetchInterventions();
   }, [student.id]);
+
+  // Obtener nombre del docente/tutor autenticado
+  useEffect(() => {
+    const fetchAuthorInfo = async () => {
+      if (userId) {
+        try {
+          const { data: docData } = await supabase
+            .from('docentes')
+            .select('id, nombre, email')
+            .eq('id', userId)
+            .maybeSingle();
+
+          if (docData?.nombre) {
+            setCurrentAuthorName(docData.nombre);
+            setCurrentDocenteId(docData.id);
+          }
+        } catch (err) {
+          console.error("Error al obtener autor de la intervención:", err);
+        }
+      }
+    };
+    fetchAuthorInfo();
+  }, [userId]);
+
+  const getEffectiveAuthorName = () => {
+    if (currentAuthorName) return currentAuthorName;
+    if (role === UserRole.TUTOR && assignedTutor?.nombre) return assignedTutor.nombre;
+    if (role === UserRole.ADMIN) return 'Administración Escolar / Tutoría';
+    if (assignedTutor?.nombre) return assignedTutor.nombre;
+    return 'Docente Tutor UAS';
+  };
 
   useEffect(() => {
     if (activeTab === 'ai' && !aiAnalysis) fetchAiAnalysis();
@@ -437,22 +472,58 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, userId, 
         targetCycleId = actCycle?.id;
       }
 
-      const payload = {
+      const authorName = getEffectiveAuthorName();
+      const authorDocenteId = currentDocenteId || (assignedTutor?.id || null);
+
+      const fullPayload = {
         estudiante_id: student.id,
         tipo_intervencion: newIntervention.type,
         descripcion: newIntervention.description.trim(),
         notas_adicionales: newIntervention.additionalNotes.trim(),
         ciclo_id: targetCycleId || null,
         estatus: newIntervention.estatus || 'COMPLETED',
+        nombre_docente: authorName,
+        docente_id: authorDocenteId,
         fecha: new Date().toISOString()
       };
 
-      const { data: insertedRows, error } = await supabase
+      let insertedRows: any[] | null = null;
+      const { data, error } = await supabase
         .from('intervenciones')
-        .insert([payload])
+        .insert([fullPayload])
         .select('*');
 
-      if (error) throw error;
+      if (error) {
+        // Fallback resiliente si las columnas nombre_docente/docente_id aún no se aplican en Supabase
+        if (error.code === '42703' || error.message?.includes('nombre_docente') || error.message?.includes('docente_id')) {
+          console.warn("Columnas de docente no presentes aún en Supabase. Registrando en modo compatible con firma.", error);
+          const fallbackNotes = newIntervention.additionalNotes.trim()
+            ? `${newIntervention.additionalNotes.trim()} [Docente/Tutor: ${authorName}]`
+            : `[Docente/Tutor: ${authorName}]`;
+
+          const fallbackPayload = {
+            estudiante_id: student.id,
+            tipo_intervencion: newIntervention.type,
+            descripcion: newIntervention.description.trim(),
+            notas_adicionales: fallbackNotes,
+            ciclo_id: targetCycleId || null,
+            estatus: newIntervention.estatus || 'COMPLETED',
+            fecha: new Date().toISOString()
+          };
+
+          const { data: fbData, error: fbError } = await supabase
+            .from('intervenciones')
+            .insert([fallbackPayload])
+            .select('*');
+
+          if (fbError) throw fbError;
+          insertedRows = fbData;
+        } else {
+          throw error;
+        }
+      } else {
+        insertedRows = data;
+      }
 
       setShowAddIntervention(false);
       setNewIntervention({
@@ -464,7 +535,7 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, userId, 
       setInterventionStatusFilter('ALL');
 
       if (insertedRows && insertedRows.length > 0) {
-        setInterventions(prev => [insertedRows[0], ...prev.filter(x => x.id !== insertedRows[0].id)]);
+        setInterventions(prev => [insertedRows![0], ...prev.filter(x => x.id !== insertedRows![0].id)]);
       }
 
       await fetchInterventions();
@@ -1654,6 +1725,21 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, userId, 
 
                     <div className="sm:col-span-2">
                       <label className="block text-[10px] font-black uppercase text-slate-400 tracking-wider mb-1">
+                        Docente / Tutor Responsable (Asignado Automáticamente)
+                      </label>
+                      <div className="w-full bg-slate-100/80 border border-slate-200 rounded-xl px-4 py-2.5 text-xs font-bold text-slate-800 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-xs"></span>
+                          <span>{getEffectiveAuthorName()}</span>
+                        </div>
+                        <span className="text-[9px] font-black uppercase tracking-wider text-[#003B5C] bg-blue-100/70 border border-blue-200 px-2.5 py-0.5 rounded-full">
+                          Autor Automático
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="sm:col-span-2">
+                      <label className="block text-[10px] font-black uppercase text-slate-400 tracking-wider mb-1">
                         Minuta de Acuerdos y Situación Detectada
                       </label>
                       <textarea
@@ -1772,7 +1858,7 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, userId, 
                               UAS
                             </span>
                             <span>
-                              Tutor / Responsable: <strong className="text-slate-900">{assignedTutor?.nombre || 'Tutor Académico FCQB'}</strong>
+                              Docente / Tutor: <strong className="text-slate-900">{item.nombre_docente || (item.docente_id && item.docentes?.nombre) || assignedTutor?.nombre || 'Docente Responsable FCQB'}</strong>
                             </span>
                           </div>
 
@@ -2093,8 +2179,8 @@ const StudentProfile: React.FC<StudentProfileProps> = ({ student, role, userId, 
                                 {cfg.shortLabel}
                               </span>
                             </td>
-                            <td className="p-2 border text-slate-600 whitespace-nowrap">
-                              {assignedTutor?.nombre || 'Tutor Responsable'}
+                            <td className="p-2 border text-slate-700 whitespace-nowrap font-medium">
+                              {intv.nombre_docente || (intv.docente_id && intv.docentes?.nombre) || assignedTutor?.nombre || 'Docente Tutor'}
                             </td>
                           </tr>
                         );

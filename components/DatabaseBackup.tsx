@@ -591,6 +591,7 @@ const DatabaseBackup: React.FC = () => {
             "Matrícula Estudiante": i.estudiante_id,
             "Nombre Estudiante": est.nombre || "Desconocido",
             "Tipo de Intervención": i.tipo_intervencion,
+            "Docente / Tutor Responsable": i.nombre_docente || "Docente Asignado",
             "Descripción": i.descripcion,
             "Notas Adicionales": i.notas_adicionales || "",
             "Estatus": i.estatus === 'COMPLETED' ? 'COMPLETADA' : 'PENDIENTE',

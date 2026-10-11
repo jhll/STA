@@ -75,6 +75,7 @@ const TutoringFollowUpView: React.FC<{ userId: string; role: UserRole }> = ({ us
   const [tutorStudents, setTutorStudents] = useState<Student[]>([]);
   const [followUps, setFollowUps] = useState<FollowUpRecord[]>([]);
   const [selectedStudentForProfile, setSelectedStudentForProfile] = useState<Student | null>(null);
+  const [tutorName, setTutorName] = useState<string>('');
 
   // Filtros
   const [searchTerm, setSearchTerm] = useState('');
@@ -115,6 +116,20 @@ const TutoringFollowUpView: React.FC<{ userId: string; role: UserRole }> = ({ us
       if (cycleData) {
         setActiveCycleId(cycleData.id);
         setActiveCycleName(cycleData.nombre);
+      }
+
+      // 1.5 Obtener nombre del tutor autenticado
+      if (userId) {
+        try {
+          const { data: userDoc } = await supabase
+            .from('docentes')
+            .select('nombre')
+            .eq('id', userId)
+            .maybeSingle();
+          if (userDoc?.nombre) setTutorName(userDoc.nombre);
+        } catch (e) {
+          console.error("Error al obtener nombre de docente:", e);
+        }
       }
 
       // 2. Obtener los alumnos asignados al tutor
@@ -323,17 +338,36 @@ const TutoringFollowUpView: React.FC<{ userId: string; role: UserRole }> = ({ us
         createForm.notas_adicionales ? `Observaciones iniciales: ${createForm.notas_adicionales.trim()}` : ''
       }`.trim();
 
+      const author = tutorName || (role === UserRole.ADMIN ? 'Administración Escolar / Tutoría' : 'Tutor Académico UAS');
+
       const newRecord = {
         estudiante_id: createForm.estudiante_id,
         tipo_intervencion: createForm.tipo_intervencion,
         descripcion: `[${createForm.area_destino}] ${createForm.descripcion.trim()}`,
         notas_adicionales: initialNote,
         ciclo_id: selectedStudentObj?.ciclo_id || activeCycleId || null,
-        estatus: createForm.estatus
+        estatus: createForm.estatus,
+        nombre_docente: author,
+        docente_id: userId || null
       };
 
       const { error } = await supabase.from('intervenciones').insert([newRecord]);
-      if (error) throw error;
+      if (error) {
+        if (error.code === '42703' || error.message?.includes('nombre_docente') || error.message?.includes('docente_id')) {
+          const fallbackRecord = {
+            estudiante_id: createForm.estudiante_id,
+            tipo_intervencion: createForm.tipo_intervencion,
+            descripcion: `[${createForm.area_destino}] ${createForm.descripcion.trim()}`,
+            notas_adicionales: `${initialNote}\n[Docente/Tutor: ${author}]`,
+            ciclo_id: selectedStudentObj?.ciclo_id || activeCycleId || null,
+            estatus: createForm.estatus
+          };
+          const { error: fbErr } = await supabase.from('intervenciones').insert([fallbackRecord]);
+          if (fbErr) throw fbErr;
+        } else {
+          throw error;
+        }
+      }
 
       alert('✅ Alumno canalizado exitosamente a la acción preventiva.');
       setShowCreateModal(false);
